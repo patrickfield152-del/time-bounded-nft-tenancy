@@ -1,5 +1,4 @@
-/target/
-/target-build/
+/target*/
 node_modules/
 .env
 .env.local

@@ -1,0 +1,42 @@
+{
+  "name": "@stele/react",
+  "version": "0.1.0",
+  "description": "React bindings for stele — <Slot>, useSlot, useBuy and the default buy dialog.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hot-labs/near-connect": "^0.11.1",
+    "near-connect-hooks": "1.1.6"
+  },
+  "peerDependencies": {
+    "@stele/sdk": "^0.1.0",
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@stele/sdk": "workspace:*",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "tsup": "^8",
+    "typescript": "^5"
+  }
+}

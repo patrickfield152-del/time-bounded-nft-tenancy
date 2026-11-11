@@ -16,7 +16,11 @@ primitive-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+
 # Native-only: parity fixtures deserialize U256; the wasm build must stay
 # core-only so `fixed-hash/std` never pulls `getrandom` into the contract.
+# `near-sdk/unit-testing` is what lets the same crate compile for a host
+# `cargo test`; it is a dev-dependency and never reaches the wasm artifact.
 [dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
 primitive-types = { workspace = true, features = ["std", "serde"] }

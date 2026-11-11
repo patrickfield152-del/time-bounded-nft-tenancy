@@ -1,0 +1,37 @@
+{
+  "name": "@stele/sdk",
+  "version": "0.1.0",
+  "description": "Client for stele: NEP-171 slot NFTs with time-bounded function-call-key tenancy and NEP-141 settlement on NEAR.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "near-api-js": "7.5.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsup": "^8",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
+  }
+}

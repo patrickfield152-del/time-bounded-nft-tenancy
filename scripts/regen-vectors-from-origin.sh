@@ -32,7 +32,7 @@ require() {
 
 require git
 require forge
-require solc
+# forge downloads the pinned solc itself; a standalone solc on PATH is optional.
 
 if ! command -v python3 >/dev/null 2>&1 && ! command -v node >/dev/null 2>&1; then
   echo "error: manifest generation needs python3 or node on PATH" >&2
@@ -100,7 +100,13 @@ if [ "${V2_ROWS}" -eq 0 ]; then
 fi
 
 FORGE_VERSION="$(forge --version | head -n 1)"
-SOLC_VERSION="$(solc --version | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+if command -v solc >/dev/null 2>&1; then
+  SOLC_VERSION="$(solc --version | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+else
+  # foundry.toml pins the compiler; report the pin forge will fetch.
+  SOLC_VERSION="$(forge config 2>/dev/null | sed -n 's/^solc = //p' | head -n 1)"
+  SOLC_VERSION="${SOLC_VERSION:-unknown (forge-managed)}"
+fi
 
 export STELE_VECTORS_DIR="${VECTORS_DIR}"
 export STELE_PRICE_FILE="${PRICE_FILE}"

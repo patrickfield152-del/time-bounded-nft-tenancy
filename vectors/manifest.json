@@ -1,0 +1,14 @@
+{
+  "price": {
+    "rows": 3024,
+    "sha256": "6d6a1769e7720149f47ba104cbbe716f75b916fd85f311b40ff192cdddc71e90",
+    "forge": "forge Version: 1.9.0",
+    "solc": "solc, the solidity compiler commandline interface Version: 0.8.30+commit.73712a01.Linux.g++"
+  },
+  "v2": {
+    "rows": 690,
+    "sha256": "60cffce4192521a7f2c8ffc5e13804c8f6d2db4ccfc166b87cdee2e9f6657eb3",
+    "forge": "forge Version: 1.9.0",
+    "solc": "solc, the solidity compiler commandline interface Version: 0.8.30+commit.73712a01.Linux.g++"
+  }
+}
