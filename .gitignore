@@ -1,10 +1,18 @@
+/target/
+/target-build/
 node_modules/
+.env
+.env.local
 dist/
 .next/
 out/
 cache/
 broadcast/
-.env
-.env.local
 *.tsbuildinfo
 .DS_Store
+.near-credentials/
+*.wasm
+wave*.log
+wave*.exit
+# Resolved on the build box; the pinned direct versions are the contract.
+Cargo.lock

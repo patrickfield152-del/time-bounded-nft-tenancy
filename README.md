@@ -1,145 +1,108 @@
-# websitekit
+# stele
 
-[![CI](https://github.com/vibecodermaxi/websitekit/actions/workflows/ci.yml/badge.svg)](https://github.com/vibecodermaxi/websitekit/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@websitekit/sdk?label=%40websitekit%2Fsdk)](https://www.npmjs.com/package/@websitekit/sdk)
+**NEP-171 slot NFTs + time-bounded function-call-key tenancy, NEP-141 settlement.**
 
-**Turn regions of your page into ownable, tradeable inventory.**
+A publisher divides a page into named slots; each slot is a NEP-171 token whose holder may write the
+content behind that slot, sell it at the site's own mean-reverting price curve, or rent it out for a
+fixed term. Tenancy is a time-bounded function-call access key: the tenant signs content writes with
+a session key scoped to the site contract and to its content-write method, while the contract asserts
+the rental window on every gated call, because a function-call key carries no expiry of its own. All
+settlement is NEP-141 (native NEAR on the native branch), payouts go through a pull ledger, and every
+site is its own account with its own storage and its own frozen code.
 
-A publisher marks parts of a page as *slots*. Anyone can buy one and become its effective owner —
-able to write its content, trade it as an ERC-721, or rent it to an advertiser without giving up the
-asset. Each site is its own contract, so one publisher's inventory and funds are structurally
-isolated from everyone else's.
+## Status
 
-```tsx
-<h1><Slot id="hero.headline" fallback="Ship faster" /></h1>
+| Wave | Scope | State |
+|---|---|---|
+| W1 REPO (gates G0 and G1) | repository scaffolding, toolchain pins, contract-crate workspace, state and type layouts | this commit; the only wave that exists |
+| W2 PRIMITIVE | pricing, rentals and terms parity, plus the site NFT core (NEP-171/177/178/181) | not written |
+| W3 FLOWS | market spine, escrow vault, mock NEP-141 settlement token, SDK, React package, demo app, sandbox dry-run | not written |
+| W4 CLOSE | numbers pin, README-as-spec rewrite, legacy sweep | not written |
+
+Only W1 is present. The contract crates in this tree define state and type layouts; no market,
+tenancy, factory, escrow or token method exists yet, and the SDK, React package, demo app and
+dry-run harness in the layout below are W3 targets.
+
+## Target layout
+
+```
+near-stele/
+|-- README.md                      # executable spec; names the primitive and its numbers
+|-- LICENSE                        # MIT, with the origin attribution
+|-- ORIGIN.md                      # provenance, baseline commit, diff link
+|-- Cargo.toml                     # workspace over contracts/*
+|-- package.json / pnpm-workspace.yaml
+|-- contracts/
+|   |-- site/                      # stele-site <- SlotSite + Pricing + RentalsLib + TermsLib
+|   |   `-- src/{lib.rs, transfer_hook.rs, pricing.rs, rentals.rs, terms.rs, ft_receiver.rs, views.rs, events.rs}
+|   |-- factory/                   # stele-factory <- SlotFactory + EscrowFactory + Attestor
+|   |-- escrow/                    # stele-escrow <- EscrowVault
+|   `-- mock-ft/                   # stele-mock-ft <- TestUSD (NEP-141/145/148)
+|-- vectors/{price-vectors.jsonl, v2-vectors.jsonl, manifest.json}   # generated once, committed; manifest = rows + sha256 per file
+|-- packages/
+|   |-- sdk/                       # @stele/sdk: pricing/rentals reused; content/keys rewritten
+|   |   `-- src/                   # near.ts, reads.ts, writes.ts, escrow.ts rewritten; tenancy.ts new
+|   `-- react/                     # @stele/react <- Slot.tsx, BuyDialog.tsx, useSlot.ts, useBuy.ts, content-store.ts, context.tsx, format.ts, index.ts
+|-- apps/demo/                     # one demo board page
+|-- scripts/{regen-vectors-from-origin.sh, deploy-testnet.sh, sandbox-dry-run.mjs, measure-method-gas.mjs}
+`-- tests/                         # near-sandbox integration
 ```
 
-That headline now has an owner, a price, and a payout when somebody takes it.
+`.gitignore`, `.env.example` and `ATTRIBUTION.md` also sit at the repository root.
 
-The second kind of inventory is an **image board**: one picture, sold as rectangular blocks of its
-squares, each block an ERC-721 that its owner fills with their own picture. See
-[Image boards](#image-boards).
+## Toolchain pins
 
-> **Live on Robinhood Chain mainnet. Experimental and unaudited.**
-> The contracts are not upgradeable — a site is a clone frozen to the implementation it was created
-> from. Prices are real dollars (USDG). Do not put in money you would mind losing.
+| Component | Pin |
+|---|---|
+| Rust | >= 1.95, edition 2024 |
+| near-sdk | 5.30.1 |
+| near-sdk-contract-tools | 4.0.0 |
+| primitive-types | 0.14.0 |
+| cargo-near | 0.23.0 |
+| near-cli-rs | 0.31.1 |
+| Node.js | >= 22.22.2 |
+| pnpm | >= 10.4.1 |
+| near-api-js | 7.5.3 |
+| near-sandbox | 0.3.5 |
+| vitest | 4.1.10 |
+| @hot-labs/near-connect | 0.11.x (hooks-bundled) |
+| near-connect-hooks | 1.1.6 |
 
-## Quick start
+`@hot-labs/near-connect` stays on the 0.11.x line because `near-connect-hooks` 1.1.6 depends on
+`^0.11.1`; a 0.12.0 root would install two copies of the connector. The sandbox harness ships Linux
+and macOS binaries only, so on a Windows host the dry-run belongs inside WSL2.
+
+## Build
+
+The contract workspace is checked against the wasm target the crates are deployed as:
 
 ```bash
-npm create websitekit my-site
-cd my-site && pnpm install && pnpm dev
+rustup target add wasm32-unknown-unknown
+cargo check --workspace --target wasm32-unknown-unknown
 ```
 
-The first run needs **no credentials**. It renders a shared demo board on Robinhood Chain mainnet:
-already claimed across two owners, with slots open, some taken, one under a live tenancy, and one
-withdrawn from sale. An empty board teaches nothing about the mechanic, so the one you start with is
-not empty. Set `NEXT_PUBLIC_WEBSITEKIT_CHAIN_ID=46630` to work on the free testnet instead.
+## Environment
 
-## How the market works
+`.env.example` holds the five variables the deploy scripts and the SDK read. The values are example
+testnet account names; the file carries no keys and no secrets.
 
-| | |
+| Variable | Purpose |
 |---|---|
-| **Claim** | An unowned slot sells at its floor. |
-| **Take** | An owned slot sells at `takeBps` of its effective floor — 1.4× on the demo board. The displaced owner is paid `payoutBps` of that same floor. |
-| **Reversion** | The takeover price reverts weekly toward the floor, bounded below by it. This is mean reversion of the *takeover price*, not loss of value — it is the handler for a position nobody is tending. |
-| **Rent** | An owner can sell temporary use without giving up the asset. Rent streams to them; the tenant holds the content gate for the term. |
+| `NEAR_FACTORY_ACCOUNT` | factory account, which also holds the attestor registry |
+| `NEAR_SITE_ACCOUNT` | demo site, a direct sub-account of the factory |
+| `NEAR_VAULT_ACCOUNT` | demo escrow vault, a direct sub-account of the factory |
+| `NEAR_FT_ACCOUNT` | mock NEP-141 settlement token |
+| `NEAR_RPC_URL` | testnet RPC endpoint |
 
-**One correction worth stating plainly**, because an earlier version of this documentation got it
-wrong: being taken is *not* guaranteed to be a profit event. The payout tracks the slot's **current**
-effective floor, not what the displaced holder paid, and reversion separates the two. In a
-128,000-call invariant campaign, 33 of 73 takes credited the displaced owner less than they paid.
-The guarantee that survives every input is narrower and worth trusting: **a displaced owner always
-receives at least the floor.**
+## Not yet implemented
 
-## Image boards
+The contract crates contain state and type layouts only. Every method lands in W2 and W3: the pricing
+and rental math, the slot NFT core, the market spine, the factory, the escrow vault and the mock
+NEP-141 token. Nothing here deploys, mints, prices, rents or settles, and this file claims no test
+result, dry-run result or measurement.
 
-A seller uploads one picture; buyers buy rectangular blocks of its square cells and put their own
-pictures in them. Each board is a token in a shared Boards collection, and the board itself is an
-ERC-721 whose tokens are its blocks, tradable anywhere. Metadata is built on chain and pictures are
-addressed by their hash on IPFS, so a board needs no particular host.
+## License and provenance
 
-| | |
-|---|---|
-| **Buy** | Any rectangle of squares, priced by the board and its zones. A price of zero keeps squares out of sale for good. |
-| **Take** | A sold square can be bought from its owner at its price times the board's take multiple, crediting the owner a payout, except in its cooldown. The take is a new block on top. |
-| **Resell** | An owner lists a whole block at their own price inside the board, or sells the token anywhere. |
-| **Rent** | An owner rents a block by the day to a named tenant, whose picture shows until the term ends. |
-
-Whoever holds the board's own token is paid for each square sold and a share of every resale, take
-and rental, and may lower the price of unsold squares but never raise it. The take terms are chosen
-when the board is created and never change. The client is `@websitekit/sdk/image-boards`; the
-rules are [`docs/IMAGE-BOARD-SPEC.md`](docs/IMAGE-BOARD-SPEC.md).
-
-## Packages
-
-| | |
-|---|---|
-| [`@websitekit/sdk`](packages/websitekit-sdk) | Reads, writes, pricing. Takes your viem client. Image boards are `@websitekit/sdk/image-boards`. |
-| [`@websitekit/react`](packages/websitekit-react) | `<Slot>`, `useSlot`, `useBuy`, `<BuyDialog>`. |
-| [`create-websitekit`](packages/create-websitekit) | Scaffold and its Next.js template. |
-| [`packages/websitekit-contracts`](packages/websitekit-contracts) | `SlotSite`, `SlotFactory`, `SlotReader`, `RentalsLib`, render escrow, and the image-board contracts. |
-
-## Contracts
-
-Four, because one does not fit under EIP-170. `SlotSite` is the sole custodian of funds and is
-**frozen** — every site is an EIP-1167 clone of it. `RentalsLib` is delegatecalled and never touches
-money. `SlotReader` holds every convenience view and is deliberately **not** frozen, so the read
-surface can improve without redeploying a single site.
-
-Three more sit beside them and are not frozen: **render escrow**. `EscrowFactory` creates a board
-whose publisher revenue is held in an `EscrowVault` for a window and paid out to slot holders if the
-page goes dark; `Attestor` names the referee that reports it. They have an owner — see
-[`SECURITY.md`](SECURITY.md).
-
-Image boards are four more, outside the frozen core too: `ImageBoard`, the implementation every
-board clones; `ImageBoardExtension`, which runs set-up and rentals by delegatecall so the board fits
-under EIP-170; `ImageBoardRenderer`, which builds every metadata string; and `ImageBoardCollection`.
-A board keeps the implementation it was created from. The collection's owner can point new boards
-at a later one and choose the tokens they settle in, and can never reach a board that exists.
-
-Deployed on **Robinhood Chain mainnet (4663)**, settling in USDG, and on the testnet (46630). Every
-mainnet contract is verified on [Sourcify](https://sourcify.dev) as an exact match. Every
-address is in [`packages/websitekit-sdk/src/addresses.ts`](packages/websitekit-sdk/src/addresses.ts),
-and image boards' in [`image-boards.ts`](packages/websitekit-sdk/src/image-boards.ts)
-(`imageBoardDeploymentFor`).
-
-## Testing
-
-Four layers, each catching what the one below cannot:
-
-1. **Unit** — the SDK against its own assumptions.
-2. **Parity** — a TypeScript pricing twin compared against real Solidity across 3,024 take-price
-   vectors and 690 ask/rent vectors, and the image-board grid twin against the 4,338 answers its
-   contract writes. Both languages can be wrong the same way, so property tests check the
-   arithmetic separately from the agreement.
-3. **End-to-end** — real bytecode on anvil, driven through the SDK. This is the layer that caught a
-   wall-clock deadline bug and a helper treating a reverted transaction as success.
-4. **Invariant** — four configuration campaigns sweeping combinations, not one config per feature,
-   and **mutation-tested**: deliberate breaks are introduced to confirm the properties catch them.
-   One of the first four did not get caught, which is why that discipline exists. Image boards
-   have a campaign of their own, which checks the board against its model cell by cell after
-   every call.
-
-```bash
-pnpm install
-pnpm test            # every package; needs `forge` on PATH
-pnpm test:contracts   # forge only
-```
-
-Requires Node 22.13+ and [Foundry](https://getfoundry.sh).
-
-## Documentation
-
-- [`docs/README.md`](docs/README.md) — the guide: the model, every mechanism, and the traps.
-- [`docs/PROTOCOL-SPEC.md`](docs/PROTOCOL-SPEC.md) — the contract spec, and what the `§` references
-  scattered through the source point at. Every parameter decision, with its reasoning.
-- [`docs/IMAGE-BOARD-SPEC.md`](docs/IMAGE-BOARD-SPEC.md) — the image-board contracts, rule by rule.
-
-The API reference is the TypeScript types and each package's README. There is deliberately no
-hand-maintained function list: the one this repo used to have went a full release describing an API
-that had already changed, because it was the only document with no compiler behind it.
-
-## License
-
-MIT © websitekit
+MIT. `LICENSE` carries the two copyright lines. `ORIGIN.md` records the upstream repository, branch,
+commit and archive hashes, and states what the port replaces. `ATTRIBUTION.md` reproduces the
+upstream copyright notice and names the SDK files that are carried over byte-identically.

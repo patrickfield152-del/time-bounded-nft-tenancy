@@ -1,31 +1,12 @@
 {
-  "name": "websitekit",
+  "name": "near-stele",
   "private": true,
   "version": "0.1.0",
-  "description": "Turn regions of your page into ownable, tradeable inventory.",
+  "description": "NEP-171 slot NFTs with time-bounded function-call-key tenancy and NEP-141 settlement.",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/vibecodermaxi/websitekit.git"
-  },
-  "homepage": "https://websitekit.org",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.4.1",
   "engines": {
-    "node": ">=22.13"
-  },
-  "scripts": {
-    "build": "pnpm -r build",
-    "build:contracts": "cd packages/websitekit-contracts && forge build",
-    "test": "pnpm build:contracts && pnpm -r test",
-    "test:contracts": "cd packages/websitekit-contracts && forge test --threads 1",
-    "sizes": "cd packages/websitekit-contracts && forge build --sizes",
-    "verify:pack": "node scripts/verify-packed.mjs",
-    "release": "node scripts/verify-packed.mjs && pnpm -r publish --access public"
-  },
-  "devDependencies": {
-    "tsup": "^8.5.1",
-    "tsx": "^4",
-    "typescript": "^5",
-    "vitest": "4.1.10"
+    "node": ">=22.22.2",
+    "pnpm": ">=10.4.1"
   }
 }

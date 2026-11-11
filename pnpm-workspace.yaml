@@ -1,9 +1,3 @@
 packages:
   - "apps/*"
   - "packages/*"
-
-allowBuilds:
-  esbuild: true
-  keccak: false
-  sharp: true
-  unrs-resolver: true

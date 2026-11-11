@@ -1,0 +1,22 @@
+[package]
+name = "stele-site"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { workspace = true }
+near-sdk-contract-tools = { workspace = true }
+primitive-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Native-only: parity fixtures deserialize U256; the wasm build must stay
+# core-only so `fixed-hash/std` never pulls `getrandom` into the contract.
+[dev-dependencies]
+primitive-types = { workspace = true, features = ["std", "serde"] }
