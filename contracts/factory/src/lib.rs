@@ -462,14 +462,14 @@ impl Contract {
                 "new".to_owned(),
                 args,
                 NearToken::from_yoctonear(0),
-                Gas::from_tgas(40),
+                Gas::from_tgas(60),
             )
             .then(
                 Promise::new(env::current_account_id()).function_call(
                     "escrowed_site_callback".to_owned(),
                     serde_json::to_vec(&json!({ "plan": plan })).unwrap_or_else(|_| env::panic_str("PlanEncode")),
                     NearToken::from_yoctonear(0),
-                    Gas::from_tgas(15),
+                    Gas::from_tgas(40),
                 ),
             )
             .detach();
@@ -504,14 +504,14 @@ impl Contract {
                 .to_string()
                 .into_bytes(),
                 NearToken::from_yoctonear(SITE_STORAGE_DEPOSIT),
-                Gas::from_tgas(20),
+                Gas::from_tgas(50),
             )
             .then(
                 Promise::new(env::current_account_id()).function_call(
                     "escrowed_registration_callback".to_owned(),
                     serde_json::to_vec(&json!({ "plan": plan })).unwrap_or_else(|_| env::panic_str("PlanEncode")),
                     NearToken::from_yoctonear(0),
-                    Gas::from_tgas(15),
+                    Gas::from_tgas(40),
                 ),
             )
             .detach();
@@ -546,14 +546,14 @@ impl Contract {
                 .to_string()
                 .into_bytes(),
                 NearToken::from_yoctonear(0),
-                Gas::from_tgas(60),
+                Gas::from_tgas(80),
             )
             .then(
                 Promise::new(env::current_account_id()).function_call(
                     "escrowed_bind_callback".to_owned(),
                     serde_json::to_vec(&json!({ "plan": plan })).unwrap_or_else(|_| env::panic_str("PlanEncode")),
                     NearToken::from_yoctonear(0),
-                    Gas::from_tgas(20),
+                    Gas::from_tgas(40),
                 ),
             )
             .detach();
