@@ -1,7 +1,7 @@
 //! NEP-297 events for the stele port, transcribed 1:1 from the origin
 //! Solidity event declarations.
 //!
-//! The origin emitted these as EVM logs from `SlotSite.sol`, `RentalsLib.sol`
+//! The origin emitted these as EVM logs from its site and rentals contracts
 //! (attributed to the site because the library was delegatecalled), and the
 //! escrow/factory/attestor contracts. The port keeps one catalog and one
 //! `standard = "stele"` so an indexer decodes every stele log with a single
@@ -23,44 +23,44 @@
 //!
 //! | # | origin file | origin event | port variant |
 //! |---|---|---|---|
-//! | 1 | SlotSite | SlotBought | `SlotBought` |
-//! | 2 | SlotSite | SlotEdited | `SlotEdited` |
-//! | 3 | SlotSite | EditorSet | `EditorSet` |
-//! | 4 | SlotSite | SlotRegistered | `SlotRegistered` |
-//! | 5 | SlotSite | AvailabilitySet | `AvailabilitySet` |
-//! | 6 | SlotSite | FloorSet | `FloorSet` |
-//! | 7 | SlotSite | AskSet | `AskSet` |
-//! | 8 | SlotSite | PayoutWithdrawn | `PayoutWithdrawn` |
-//! | 9 | SlotSite | TreasurySet | `TreasurySet` |
-//! | 10 | SlotSite | TreasurySwept | `TreasurySwept` |
-//! | 11 | SlotSite | PausedSet | `PausedSet` |
-//! | 12 | SlotSite | OpenRegistrationSet | `OpenRegistrationSet` |
-//! | 13 | SlotSite | BaseTokenURISet | `BaseTokenUriSet` |
-//! | 14 | SlotSite | RoyaltySet | `RoyaltySet` |
-//! | 15 | SlotSite | SiteInitialized | `SiteInitialized` |
-//! | 16 | SlotSite | TermsLocked | `TermsLocked` |
-//! | 17 | SlotSite | EconomicsChanged | `EconomicsChanged` |
-//! | 18 | SlotSite | RentalTermsChanged | `RentalTermsChanged` |
-//! | 19 | SlotSite | RentClaimed | `RentClaimed` |
-//! | 20 | RentalsLib | RentalListed | `RentalListed` |
-//! | 21 | RentalsLib | SlotRented | `SlotRented` |
-//! | 22 | RentalsLib | RentalExtended | `RentalExtended` |
-//! | 23 | RentalsLib | RentalEnded | `RentalEnded` |
-//! | 24 | RentalsLib | UpdateUser | `TenancyChanged` |
-//! | 25 | EscrowVault | Bound | `Bound` |
-//! | 26 | EscrowVault | Booked | `Booked` |
-//! | 27 | EscrowVault | Released | `Released` |
-//! | 28 | EscrowVault | Claimed | `Claimed` |
-//! | 29 | EscrowVault | Withdrawn | `Withdrawn` |
-//! | 30 | EscrowVault | MarkedDark | `MarkedDark` |
-//! | 31 | EscrowVault | ClearedDark | `ClearedDark` |
-//! | 32 | EscrowVault | ForeignSwept | `ForeignSwept` |
-//! | 33 | EscrowVault | ReserveFunded | `ReserveFunded` |
-//! | 34 | EscrowVault | ReserveWithdrawn | `ReserveWithdrawn` |
-//! | 35 | EscrowFactory | EscrowedSiteCreated | `EscrowedSiteCreated` |
-//! | 36 | EscrowFactory | ParamsSet | `ParamsSet` |
-//! | 37 | EscrowFactory | TokenAllowed | `TokenAllowed` |
-//! | 38 | SlotFactory | SiteCreated | `SiteCreated` |
+//! | 1 | origin | SlotBought | `SlotBought` |
+//! | 2 | origin | SlotEdited | `SlotEdited` |
+//! | 3 | origin | EditorSet | `EditorSet` |
+//! | 4 | origin | SlotRegistered | `SlotRegistered` |
+//! | 5 | origin | AvailabilitySet | `AvailabilitySet` |
+//! | 6 | origin | FloorSet | `FloorSet` |
+//! | 7 | origin | AskSet | `AskSet` |
+//! | 8 | origin | PayoutWithdrawn | `PayoutWithdrawn` |
+//! | 9 | origin | TreasurySet | `TreasurySet` |
+//! | 10 | origin | TreasurySwept | `TreasurySwept` |
+//! | 11 | origin | PausedSet | `PausedSet` |
+//! | 12 | origin | OpenRegistrationSet | `OpenRegistrationSet` |
+//! | 13 | origin | BaseTokenURISet | `BaseTokenUriSet` |
+//! | 14 | origin | RoyaltySet | `RoyaltySet` |
+//! | 15 | origin | SiteInitialized | `SiteInitialized` |
+//! | 16 | origin | TermsLocked | `TermsLocked` |
+//! | 17 | origin | EconomicsChanged | `EconomicsChanged` |
+//! | 18 | origin | RentalTermsChanged | `RentalTermsChanged` |
+//! | 19 | origin | RentClaimed | `RentClaimed` |
+//! | 20 | origin | RentalListed | `RentalListed` |
+//! | 21 | origin | SlotRented | `SlotRented` |
+//! | 22 | origin | RentalExtended | `RentalExtended` |
+//! | 23 | origin | RentalEnded | `RentalEnded` |
+//! | 24 | origin | UpdateUser | `TenancyChanged` |
+//! | 25 | origin | Bound | `Bound` |
+//! | 26 | origin | Booked | `Booked` |
+//! | 27 | origin | Released | `Released` |
+//! | 28 | origin | Claimed | `Claimed` |
+//! | 29 | origin | Withdrawn | `Withdrawn` |
+//! | 30 | origin | MarkedDark | `MarkedDark` |
+//! | 31 | origin | ClearedDark | `ClearedDark` |
+//! | 32 | origin | ForeignSwept | `ForeignSwept` |
+//! | 33 | origin | ReserveFunded | `ReserveFunded` |
+//! | 34 | origin | ReserveWithdrawn | `ReserveWithdrawn` |
+//! | 35 | origin | EscrowedSiteCreated | `EscrowedSiteCreated` |
+//! | 36 | origin | ParamsSet | `ParamsSet` |
+//! | 37 | origin | TokenAllowed | `TokenAllowed` |
+//! | 38 | origin factory | SiteCreated | `SiteCreated` |
 //! | 39 | Attestor | AttestorSet | `AttestorSet` |
 
 use near_sdk::json_types::{U128, U64};
@@ -287,7 +287,7 @@ pub enum SteleEvent {
 
     // --------------------------------------------------------------- escrow
 
-    /// Origin `Bound` (EscrowVault). Durations stay in seconds, as
+    /// Origin `Bound` (origin escrow). Durations stay in seconds, as
     /// configured.
     #[event_version("1.0.0")]
     Bound {
@@ -298,7 +298,7 @@ pub enum SteleEvent {
         min_booking: U128,
     },
 
-    /// Origin `Booked` (EscrowVault). `deposit_id` is the vector index.
+    /// Origin `Booked` (origin escrow). `deposit_id` is the vector index.
     #[event_version("1.0.0")]
     Booked {
         deposit_id: u64,
@@ -307,7 +307,7 @@ pub enum SteleEvent {
         dark_at_booking_ns: U64,
     },
 
-    /// Origin `Released` (EscrowVault).
+    /// Origin `Released` (origin escrow).
     #[event_version("1.0.0")]
     Released {
         deposit_id: u64,
@@ -315,7 +315,7 @@ pub enum SteleEvent {
         amount: U128,
     },
 
-    /// Origin `Claimed` (EscrowVault surrender).
+    /// Origin `Claimed` (origin escrow surrender).
     #[event_version("1.0.0")]
     Claimed {
         token_id: String,
@@ -324,20 +324,20 @@ pub enum SteleEvent {
         from_reserve: U128,
     },
 
-    /// Origin `Withdrawn` (EscrowVault pull ledger).
+    /// Origin `Withdrawn` (origin escrow pull ledger).
     #[event_version("1.0.0")]
     Withdrawn {
         account: AccountId,
         amount: U128,
     },
 
-    /// Origin `MarkedDark` (EscrowVault).
+    /// Origin `MarkedDark` (origin escrow).
     #[event_version("1.0.0")]
     MarkedDark {
         at_ns: U64,
     },
 
-    /// Origin `ClearedDark` (EscrowVault). `dark_accrued_ns` is the dark
+    /// Origin `ClearedDark` (origin escrow). `dark_accrued_ns` is the dark
     /// duration that matured.
     #[event_version("1.0.0")]
     ClearedDark {
@@ -345,7 +345,7 @@ pub enum SteleEvent {
         dark_accrued_ns: U64,
     },
 
-    /// Origin `ForeignSwept` (EscrowVault).
+    /// Origin `ForeignSwept` (origin escrow).
     #[event_version("1.0.0")]
     ForeignSwept {
         token: AccountId,
@@ -353,7 +353,7 @@ pub enum SteleEvent {
         amount: U128,
     },
 
-    /// Origin `ReserveFunded` (EscrowVault). The origin field is named `from`,
+    /// Origin `ReserveFunded` (origin escrow). The origin field is named `from`,
     /// a Rust keyword, so the Rust field is `funder` with a serde rename that
     /// keeps the payload key `from`.
     #[event_version("1.0.0")]
@@ -363,7 +363,7 @@ pub enum SteleEvent {
         amount: U128,
     },
 
-    /// Origin `ReserveWithdrawn` (EscrowVault).
+    /// Origin `ReserveWithdrawn` (origin escrow).
     #[event_version("1.0.0")]
     ReserveWithdrawn {
         to: AccountId,
@@ -372,7 +372,7 @@ pub enum SteleEvent {
 
     // -------------------------------------------------- escrow factory / site factory / attestor
 
-    /// Origin `EscrowedSiteCreated` (EscrowFactory).
+    /// Origin `EscrowedSiteCreated` (origin factory).
     #[event_version("1.0.0")]
     EscrowedSiteCreated {
         owner: AccountId,
@@ -381,7 +381,7 @@ pub enum SteleEvent {
         creator: AccountId,
     },
 
-    /// Origin `ParamsSet` (EscrowFactory). Durations stay in seconds.
+    /// Origin `ParamsSet` (origin factory). Durations stay in seconds.
     #[event_version("1.0.0")]
     ParamsSet {
         window_secs: u64,
@@ -390,14 +390,14 @@ pub enum SteleEvent {
         min_booking: U128,
     },
 
-    /// Origin `TokenAllowed` (EscrowFactory).
+    /// Origin `TokenAllowed` (origin factory).
     #[event_version("1.0.0")]
     TokenAllowed {
         token: AccountId,
         allowed: bool,
     },
 
-    /// Origin `SiteCreated` (SlotFactory).
+    /// Origin `SiteCreated` (origin factory).
     #[event_version("1.0.0")]
     SiteCreated {
         owner: AccountId,

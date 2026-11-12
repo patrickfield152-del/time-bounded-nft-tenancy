@@ -94,7 +94,7 @@ pub fn compute_split(
     Split { charged, payout, protocol_cut, site_cut }
 }
 
-/// Mirrors `SlotSite._computeElapsedWeeks`; panics on underflow instead of quoting an undecayed
+/// Mirrors `origin site._computeElapsedWeeks`; panics on underflow instead of quoting an undecayed
 /// price.
 pub fn compute_elapsed_weeks(now_ts: u64, last_purchase_ts: u64) -> u64 {
     now_ts.checked_sub(last_purchase_ts).expect("pricing: nowTs must be >= lastPurchaseTs")

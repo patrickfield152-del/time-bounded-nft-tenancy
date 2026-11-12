@@ -1,4 +1,4 @@
-//! Rent arithmetic, ported 1:1 from the origin `RentalsLib` through its byte-identical
+//! Rent arithmetic, ported 1:1 from the origin `origin rentals library` through its byte-identical
 //! TypeScript twin (`packages/sdk/src/rentals.ts`).
 //!
 //! Rates are per DAY, durations are in SECONDS, and nothing here moves money: the site contract
@@ -43,7 +43,7 @@ pub struct RentSplit {
     pub net: U256,
 }
 
-/// Mirrors `RentalsLib.accruedOf`: linear accrual, no segment history.
+/// Mirrors `origin rentals library.accruedOf`: linear accrual, no segment history.
 pub fn accrued_of(prepaid: U256, start: u64, expiry: u64, now_ts: u64) -> U256 {
     if expiry == 0 {
         return U256::zero();
@@ -61,12 +61,12 @@ pub fn accrual(prepaid: U256, start: u64, expiry: u64, now_ts: u64) -> Accrual {
     Accrual { accrued, unaccrued: sub(prepaid, accrued) }
 }
 
-/// Mirrors `RentalsLib.rentCost`: gross rent for a term.
+/// Mirrors `origin rentals library.rentCost`: gross rent for a term.
 pub fn rent_cost(rate_per_day: U256, duration_secs: u64) -> U256 {
     mul(rate_per_day, U256::from(duration_secs)) / U256::from(SECONDS_PER_DAY)
 }
 
-/// Mirrors `RentalsLib.rentSplit`; both cuts key to the GROSS cost and `net` is what remains.
+/// Mirrors `origin rentals library.rentSplit`; both cuts key to the GROSS cost and `net` is what remains.
 pub fn rent_split(cost: U256, protocol_rent_bps: u64, fee_bps: u64) -> RentSplit {
     let protocol_cut = mul(cost, U256::from(protocol_rent_bps)) / U256::from(BPS_DENOMINATOR);
     let site_cut = mul(cost, U256::from(fee_bps)) / U256::from(BPS_DENOMINATOR);
@@ -75,7 +75,7 @@ pub fn rent_split(cost: U256, protocol_rent_bps: u64, fee_bps: u64) -> RentSplit
 
 /// True when `duration_secs` sits inside `[MIN_RENTAL_DURATION, max_duration_secs]`.
 ///
-/// Mirrors the `TermTooLong` half of `RentalsLib.list`/`open`/`extend`: the floor keeps a per-day
+/// Mirrors the `TermTooLong` half of `origin rentals library.list`/`open`/`extend`: the floor keeps a per-day
 /// rate from being charged against an unrepresentably short term, and the ceiling is the caller's
 /// cap — `max_rental_term_secs` for a listing, the listing's own `max_duration_secs` for a rent or
 /// an extension. A cap of zero (no listing) admits nothing.
@@ -83,7 +83,7 @@ pub fn duration_ok(duration_secs: u64, max_duration_secs: u64) -> bool {
     duration_secs >= MIN_RENTAL_DURATION && duration_secs <= max_duration_secs
 }
 
-/// Mirrors the `RateBelowFloor` half of `RentalsLib.list`: a daily rate must clear
+/// Mirrors the `RateBelowFloor` half of `origin rentals library.list`: a daily rate must clear
 /// `effective_floor * min_rent_bps / 10_000`.
 ///
 /// Keyed to the EFFECTIVE floor, not `base_price`, so the rent floor tracks the same decayed number

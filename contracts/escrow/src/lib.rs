@@ -1,7 +1,7 @@
 //! stele escrow vault: balance-delta booking, dark clock, and the three-phase
 //! NEP-178 surrender claim.
 //!
-//! Port of `EscrowVault.sol` (626 lines) under the async constraint that makes
+//! Port of the origin escrow contract (626 lines) under the async constraint that makes
 //! this the hardest rewrite in the collection: NEAR cross-contract calls are
 //! asynchronous, so every fact the origin read from the site synchronously
 //! (`treasury`, `settlementToken`, `ownerOfOrZero`, `slotOf`) arrives in a

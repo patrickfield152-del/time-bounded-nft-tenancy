@@ -1,8 +1,8 @@
 //! stele factory: per-site sub-account deployment, escrow-vault wiring, and
 //! the rotatable attestor registry.
 //!
-//! Port of `SlotFactory.sol`, `EscrowFactory.sol` and `Attestor.sol`. There is
-//! no `delegatecall` and no EIP-1167 on NEAR, so a site is a direct
+//! Port of the origin factory, escrow and attestor contracts. There is
+//! no `delegatecall` and no clone-proxy on NEAR, so a site is a direct
 //! sub-account of this contract carrying its own copy of the site wasm:
 //! `create_account -> transfer -> deploy_contract -> function_call("new")` in
 //! one receipt batch, exactly the verified factory pattern. Global contracts

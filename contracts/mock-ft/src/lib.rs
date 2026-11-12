@@ -1,6 +1,6 @@
 //! stele mock settlement token: NEP-141/145/148 with 6 decimals.
 //!
-//! Port of `mocks/TestUSD.sol`. The `FungibleToken` derive (near-sdk-contract-tools
+//! Port of the origin mock USD token. The `FungibleToken` derive (near-sdk-contract-tools
 //! 4.0.0) expands to NEP-141 + NEP-145 + NEP-148, so `ft_transfer`,
 //! `ft_transfer_call`, `ft_balance_of`, `ft_total_supply`, `ft_metadata`,
 //! `storage_deposit`, `storage_withdraw`, `storage_unregister` and

@@ -1,5 +1,5 @@
 //! Validation policy for [`SiteConfig`]: the port of the origin `TermsLib`
-//! plus the rent-term clamps from `SlotSite._validateRentTerms`.
+//! plus the rent-term clamps from `origin site._validateRentTerms`.
 //!
 //! The ratchets bind a holder who cannot exit: their only escape is being
 //! taken, which they cannot force, so once terms are locked a site may move
