@@ -225,7 +225,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
     factory.account,
     IDS.factory,
     "store_site_code",
-    { code: Array.from(siteBytes) },
+    { code: siteBytes.toString("base64") },
     { deposit: ONE_YOCTO },
   );
   step(log, "factory.store_site_code", storeSite);
@@ -233,7 +233,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
     factory.account,
     IDS.factory,
     "store_escrow_code",
-    { code: Array.from(escrowBytes) },
+    { code: escrowBytes.toString("base64") },
     { deposit: ONE_YOCTO },
   );
   step(log, "factory.store_escrow_code", storeEscrow);

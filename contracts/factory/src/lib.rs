@@ -26,7 +26,7 @@
 //! when the chain failed. Nothing is credited on a failure path; the only
 //! irreversible spend is an account that already exists.
 
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::store::LookupMap;
 use near_sdk::utils::is_promise_success;
 use near_sdk::{
@@ -210,20 +210,18 @@ impl Contract {
     /// Owner-only upload of the site wasm. Payable: the attached value stays on
     /// this account and stakes the code bytes.
     #[payable]
-    pub fn store_site_code(&mut self, code: Vec<u8>) {
-
+    pub fn store_site_code(&mut self, code: Base64VecU8) {
         self.assert_owner();
-        require!(!code.is_empty(), "EmptyCode");
-        self.site_code = code;
+        require!(!code.0.is_empty(), "EmptyCode");
+        self.site_code = code.0;
     }
 
     /// Owner-only upload of the escrow wasm.
     #[payable]
-    pub fn store_escrow_code(&mut self, code: Vec<u8>) {
-
+    pub fn store_escrow_code(&mut self, code: Base64VecU8) {
         self.assert_owner();
-        require!(!code.is_empty(), "EmptyCode");
-        self.escrow_code = code;
+        require!(!code.0.is_empty(), "EmptyCode");
+        self.escrow_code = code.0;
     }
 
     /// Owner-only: policy for every vault this factory will create.
