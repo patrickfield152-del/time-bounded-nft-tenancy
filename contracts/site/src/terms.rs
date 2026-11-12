@@ -1,5 +1,5 @@
-//! Validation policy for [`SiteConfig`]: the port of the origin `TermsLib`
-//! plus the rent-term clamps from `origin site._validateRentTerms`.
+//! Validation policy for [`SiteConfig`]: the port of the the origin terms library
+//! plus the rent-term clamps from the origin terms validator.
 //!
 //! The ratchets bind a holder who cannot exit: their only escape is being
 //! taken, which they cannot force, so once terms are locked a site may move
@@ -12,17 +12,17 @@ use crate::SiteConfig;
 
 /// 100% in basis points.
 const BPS_DENOMINATOR: u64 = 10_000;
-/// Origin `TermsLib.MAX_TAKE_BPS`.
+/// Origin `MAX_TAKE_BPS` in the origin terms library.
 const MAX_TAKE_BPS: u64 = 30_000;
-/// Origin `TermsLib.MAX_REVERSION_WEEKS_CEILING`.
+/// Origin `origin terms library.MAX_REVERSION_WEEKS_CEILING`.
 const MAX_REVERSION_WEEKS: u32 = 52;
-/// Origin `TermsLib.MAX_COOLDOWN_SECS` (`7 days`).
+/// Origin `origin terms library.MAX_COOLDOWN_SECS` (`7 days`).
 const MAX_COOLDOWN_SECS: u64 = 7 * 24 * 60 * 60;
-/// Origin `TermsLib.MIN_MAX_ASK_BPS`.
+/// Origin `origin terms library.MIN_MAX_ASK_BPS`.
 const MIN_MAX_ASK_BPS: u64 = 10_000;
-/// Origin `TermsLib.MAX_FLOOR_DELTA_BPS_CEILING`.
+/// Origin `origin terms library.MAX_FLOOR_DELTA_BPS_CEILING`.
 const MAX_FLOOR_DELTA_BPS: u64 = 2_000;
-/// Origin `TermsLib.MIN_FLOOR_CHANGE_COOLDOWN` (`24 hours`).
+/// Origin `origin terms library.MIN_FLOOR_CHANGE_COOLDOWN` (`24 hours`).
 const MIN_FLOOR_CHANGE_COOLDOWN_SECS: u64 = 24 * 60 * 60;
 
 /// Protocol take cap (`protocol_bps <= 10_000`).
@@ -57,7 +57,7 @@ pub fn check_config_absolute(c: &SiteConfig) {
 
 /// Ratchets first (only when `locked`), then the absolute clamps.
 ///
-/// Error order is parity: the origin `TermsLib.checkEconomics` runs the
+/// Error order is parity: the origin `origin terms library.checkEconomics` runs the
 /// holder-safe ratchet block before `checkEconomicsAbsolute`, so a change that
 /// violates both directions must report the ratchet violation.
 pub fn check_economics(prev: &SiteConfig, next: &SiteConfig, locked: bool) {
@@ -179,7 +179,7 @@ fn check_economics_absolute_fields(c: &SiteConfig, protocol_bps: Option<u64>) {
 }
 
 /// Holder-safe directions, run only after the terms lock. Each inequality is
-/// the origin `TermsLib.checkEconomics` ratchet.
+/// the origin `origin terms library.checkEconomics` ratchet.
 fn check_economics_ratchets(prev: &SiteConfig, next: &SiteConfig) {
     assert!(
         next.take_bps <= prev.take_bps,
@@ -206,7 +206,7 @@ fn check_economics_ratchets(prev: &SiteConfig, next: &SiteConfig) {
     );
 }
 
-/// Absolute floor-policy clamps from origin `TermsLib.checkFloorPolicy`.
+/// Absolute floor-policy clamps from origin `origin terms library.checkFloorPolicy`.
 fn check_floor_policy_absolute(c: &SiteConfig) {
     assert!(
         (1..=MAX_FLOOR_DELTA_BPS).contains(&c.floor_delta_bps),

@@ -189,7 +189,7 @@ pub enum SteleEvent {
         uri: String,
     },
 
-    /// Origin `RoyaltySet`. Display-only ERC-2981 analog.
+    /// Origin `RoyaltySet`. Display-only royalty analog.
     #[event_version("1.0.0")]
     RoyaltySet {
         bps: u16,
@@ -274,8 +274,8 @@ pub enum SteleEvent {
         restored_hash: String,
     },
 
-    /// Origin `UpdateUser` (ERC-4907). Renamed `tenancy_changed` because NEAR
-    /// has no ERC-4907 and the event marks every tenancy transition, including
+    /// Origin `UpdateUser` (origin tenancy extension). Renamed `tenancy_changed` because NEAR
+    /// has no origin tenancy extension and the event marks every tenancy transition, including
     /// the clear on `end_rental` where `tenant` is `None` (origin
     /// `address(0)`) and `expiry_ns` is `0`.
     #[event_version("1.0.0")]

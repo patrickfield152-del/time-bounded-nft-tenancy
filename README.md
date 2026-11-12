@@ -86,7 +86,7 @@ cargo-near 0.23.0 · near-cli-rs 0.31.1.
 ## Environment
 
 `.env.example` carries `NEAR_FACTORY_ACCOUNT`, `NEAR_SITE_ACCOUNT`, `NEAR_VAULT_ACCOUNT`,
-`NEAR_FT_ACCOUNT`, `NEAR_RPC_URL` (testnet placeholders, no keys).
+`NEAR_FT_ACCOUNT`, `NEAR_RPC_URL` (testnet example values, no keys).
 
 ## Limits
 

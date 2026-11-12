@@ -6,7 +6,7 @@
 //! sub-account of this contract carrying its own copy of the site wasm:
 //! `create_account -> transfer -> deploy_contract -> function_call("new")` in
 //! one receipt batch, exactly the verified factory pattern. Global contracts
-//! are never used (`nft.globals.primitives.*` is codeless on chain today, and
+//! are never used (the global NFT primitives are codeless on chain today, and
 //! by-hash references cannot be verified on public RPC).
 //!
 //! ## Code storage

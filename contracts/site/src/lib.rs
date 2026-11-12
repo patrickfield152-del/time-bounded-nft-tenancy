@@ -70,7 +70,7 @@ pub(crate) const MAX_ROYALTY_BPS: u16 = 1_000;
 pub(crate) const IMPLEMENTATION_VERSION: u32 = 2;
 
 /// Readable dotted slot key, used directly as the NEP-171 `token_id`
-/// (documented deviation: origin used `uint256(keccak256(key))`).
+/// (documented deviation: origin used a hashed key).
 pub type TokenId = String;
 
 /// Per-slot market state. Timestamps are nanoseconds at the contract boundary;
@@ -646,7 +646,7 @@ impl Contract {
         SteleEvent::BaseTokenUriSet { uri }.emit();
     }
 
-    /// Display-only ERC-2981 analog: `royalty_info` is never deducted.
+    /// Display-only royalty analog: `royalty_info` is never deducted.
     pub fn set_royalty(&mut self, bps: u16) {
         Self::require_owner();
         require!(bps <= MAX_ROYALTY_BPS, "InvalidConfig");

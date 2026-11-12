@@ -1,4 +1,4 @@
-//! Pure money math, ported 1:1 from the origin `Pricing.sol` through its byte-identical
+//! Pure money math, ported 1:1 from the the origin pricing module through its byte-identical
 //! TypeScript twin (`packages/sdk/src/pricing.ts`).
 //!
 //! Everything here is `U256` and total: the 3,024-row parity grid includes `uint256` overflow

@@ -45,7 +45,7 @@ pub struct TermsView {
     /// The factory pins the treasury for escrowed sites; a vault's `bind`
     /// requires this true, so the terms view must carry it.
     pub treasury_pinned: bool,
-    /// Display-only ERC-2981 analog (`treasury_royalty_bps`).
+    /// Display-only royalty analog (`treasury_royalty_bps`).
     pub royalty_bps: u16,
 }
 
