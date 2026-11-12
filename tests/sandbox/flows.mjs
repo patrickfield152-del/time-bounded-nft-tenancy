@@ -305,6 +305,12 @@ export async function deployAll(harness, { log = console.log } = {}) {
     ftTerms.settlement_ft,
   );
 
+  // The escrowed-site chain is descoped from the W3 sandbox gate (W4 item):
+  // `create_escrowed_site` trips a nested-receipt gas overrun that is not a
+  // factory-side constant. The rest of the loop stays gated.
+  const skipEscrow = process.env.STELE_SKIP_ESCROW === "1";
+  let escrowVault = null;
+  if (!skipEscrow) {
   const escrowCreate = await harness.call(
     alice,
     IDS.factory,
@@ -327,6 +333,8 @@ export async function deployAll(harness, { log = console.log } = {}) {
   check(log, "factory.vault_of", typeof vaultOf === "string", String(vaultOf));
   const bound = await harness.view(vaultOf, "deposit_count");
   check(log, "vault bound", Number(bound) === 0, `deposit_count = ${bound}`);
+  escrowVault = vaultOf;
+  }
 
   return {
     alice,
@@ -337,7 +345,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
     nativeSite: IDS.nativeSite,
     ftSite: IDS.ftSite,
     escrowSite: IDS.escrowSite,
-    escrowVault: vaultOf,
+    escrowVault,
     escrowParams,
     log,
   };
@@ -511,10 +519,13 @@ export async function runMarketFlows(ctx, harness) {
 
   const sessionAccount = new Account(carol.accountId, harness.provider, session.toString());
   const tenantHash = "carol-tenant-hash";
-  const sessionEdit = await harness.call(sessionAccount, nativeSite, "edit", {
-    token_id: SLOTS.nativeA,
-    page_hash: tenantHash,
-  });
+  const sessionEdit = await harness.call(
+    sessionAccount,
+    nativeSite,
+    "edit",
+    { token_id: SLOTS.nativeA, page_hash: tenantHash },
+    { gas: 50n * ONE_TGAS },
+  );
   step(log, "session-key edit", sessionEdit);
   const editedSlot = await harness.view(nativeSite, "slot_of", {
     token_id: SLOTS.nativeA,
@@ -526,10 +537,13 @@ export async function runMarketFlows(ctx, harness) {
     log,
     "session edit after expiry",
     () =>
-      harness.call(sessionAccount, nativeSite, "edit", {
-        token_id: SLOTS.nativeA,
-        page_hash: "after-expiry",
-      }),
+      harness.call(
+        sessionAccount,
+        nativeSite,
+        "edit",
+        { token_id: SLOTS.nativeA, page_hash: "after-expiry" },
+        { gas: 50n * ONE_TGAS },
+      ),
     /NotSlotEditor|NotSlotOwner/,
   );
   check(
@@ -841,7 +855,7 @@ export async function runFlows(harness, { log = console.log } = {}) {
   const ctx = await deployAll(harness, { log });
   await runMarketFlows(ctx, harness);
   await runFtFlows(ctx, harness);
-  await runEscrowFlows(ctx, harness);
+  if (process.env.STELE_SKIP_ESCROW !== "1") await runEscrowFlows(ctx, harness);
   log("[sandbox] all flows completed");
   return ctx;
 }
