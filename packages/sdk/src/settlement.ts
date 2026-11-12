@@ -18,6 +18,8 @@
  * the same code path.
  */
 import { readView, type AccountId, type Reader } from './near';
+import { nearToYocto } from 'near-api-js';
+export { nearToYocto };
 
 /** A `u128` in its wire form: a decimal string between `0` and `2^128 - 1`. */
 export type U128 = string;
@@ -107,15 +109,7 @@ export function formatUnits(value: bigint, decimals: number): string {
   return `${sign}${whole}.${padded}`;
 }
 
-/**
- * NEAR into yoctoNEAR, exactly. 24 decimals, no float.
- *
- * The same number a function-call key's allowance is denominated in, which is why it lives here
- * rather than in the tenancy module: an allowance and a price are the same unit.
- */
-export function nearToYocto(near: string): bigint {
-  return parseUnits(near, 24);
-}
+
 
 /**
  * NEP-145 `storage_balance_bounds().min` on a site: 0.007 NEAR.

@@ -150,19 +150,6 @@ impl Contract {
         U128(pricing::to_u128(accrued, "accrued rent"))
     }
 
-    /// Origin `unaccruedRent`: the unearned remainder — what a buyer inherits.
-    pub fn unaccrued_rent(&self, token_id: TokenId) -> U128 {
-        let Some(rental) = self.rentals.get(&token_id) else {
-            return U128(0);
-        };
-        let accrual = rentals::accrual(
-            U256::from(rental.prepaid.0),
-            rental.start / NS_PER_SEC,
-            rental.expiry / NS_PER_SEC,
-            env::block_timestamp() / NS_PER_SEC,
-        );
-        U128(pricing::to_u128(accrual.unaccrued, "unaccrued rent"))
-    }
 
     pub fn pending_withdrawals(&self, account: AccountId) -> U128 {
         self.pending_withdrawals

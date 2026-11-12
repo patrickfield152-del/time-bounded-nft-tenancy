@@ -31,6 +31,7 @@
  * untrusted and escapes at render.
  */
 import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes as nobleHexToBytes } from '@noble/hashes/utils.js';
 
 /** A SHA-256 digest as 64 lowercase hex characters. The contract stores this form directly. */
 export type ContentHash = string;
@@ -431,17 +432,16 @@ export function ipfsGatewayUrl(cid: string, gateway: string): string {
 // ---------------------------------------------------------------------------
 
 function base64Encode(bytes: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i]!;
-    const b1 = bytes[i + 1];
-    const b2 = bytes[i + 2];
-    out += BASE64[b0 >>> 2]!;
-    out += BASE64[((b0 & 0x03) << 4) | ((b1 ?? 0) >>> 4)]!;
-    out += b1 === undefined ? '=' : BASE64[((b1 & 0x0f) << 2) | ((b2 ?? 0) >>> 6)]!;
-    out += b2 === undefined ? '=' : BASE64[b2 & 0x3f]!;
-  }
-  return out;
+  // `as` is unavoidable: `Buffer` is a Node global absent from the DOM lib.
+  const BufferCtor = (
+    globalThis as unknown as {
+      Buffer?: { from(input: Uint8Array): { toString(encoding: string): string } };
+    }
+  ).Buffer;
+  if (BufferCtor) return BufferCtor.from(bytes).toString('base64');
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function base32Encode(bytes: Uint8Array): string {
@@ -479,20 +479,14 @@ function base32Decode(text: string): Uint8Array {
 
 function hexToBytes(hex: ContentHash): Uint8Array {
   if (hex.length % 2 !== 0) throw new MalformedContentError('hex string has an odd length');
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    const byte = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    if (Number.isNaN(byte)) throw new MalformedContentError(`"${hex}" is not valid hex`);
-    out[i] = byte;
+  try {
+    return nobleHexToBytes(hex);
+  } catch {
+    throw new MalformedContentError(`"${hex}" is not valid hex`);
   }
-  return out;
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  let out = '';
-  for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
-  return out;
-}
+
 
 function assertByte(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 0 || value > 255) {

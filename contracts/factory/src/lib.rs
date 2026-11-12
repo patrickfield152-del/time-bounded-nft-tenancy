@@ -91,16 +91,6 @@ pub const NATIVE_TOKEN_KEY: &str = "near";
 /// Native NEAR decimals, used to seed the allow-list at `new`.
 pub const NATIVE_DECIMALS: u8 = 24;
 
-/// Attestor pointer; `None` means fail-open to the factory owner, as in the
-/// origin registry.
-#[near(serializers = [json, borsh])]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FactoryParams {
-    pub protocol_treasury: AccountId,
-    pub protocol_bps: u64,
-    pub protocol_rent_bps: u64,
-    pub attestor: Option<AccountId>,
-}
 
 /// Settlement-asset allow-list entry. `decimals` is what the factory uses to
 /// derive `min_slot_floor = 10^(decimals - 4)` for every site it creates

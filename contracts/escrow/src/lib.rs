@@ -150,9 +150,6 @@ pub struct Contract {
     pub claimed_epoch: LookupMap<TokenId, u64>,
     /// `(token_id, owner)` -> approval id captured by `nft_on_approve`.
     pub approvals: LookupMap<(TokenId, AccountId), u64>,
-    /// Site legs cached at book time (`claimable_local` is cache-only).
-    pub site_treasury_balance: U128,
-    pub site_pending: U128,
     pub deposits: Vector<Deposit>,
     pub head: u64,
     /// Last observed settlement-FT balance, so `unbooked()` can answer for an
@@ -189,8 +186,6 @@ impl Contract {
             pending: LookupMap::new(StorageKey::Pending),
             claimed_epoch: LookupMap::new(StorageKey::ClaimedEpoch),
             approvals: LookupMap::new(StorageKey::Approvals),
-            site_treasury_balance: U128(0),
-            site_pending: U128(0),
             deposits: Vector::new(StorageKey::Deposits),
             head: 0,
             ft_balance_cache: U128(0),
@@ -795,10 +790,6 @@ impl Contract {
             .saturating_add(self.pending_total.0)
             .saturating_add(self.reserve.0);
         let booked = balance.saturating_sub(accounted);
-        // Both site legs were just asked to empty into this vault; anything
-        // still there is re-read by the next crank.
-        self.site_treasury_balance = U128(0);
-        self.site_pending = U128(0);
         if booked != 0 && booked >= self.min_booking.0 {
             let beneficiary = self.pending_beneficiary.clone();
             self.push_deposit(U128(booked), beneficiary);
