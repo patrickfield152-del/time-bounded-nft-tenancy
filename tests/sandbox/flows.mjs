@@ -533,19 +533,24 @@ export async function runMarketFlows(ctx, harness) {
   check(log, "tenant page hash is live", editedSlot.page_hash === tenantHash);
 
   await harness.fastForward(8_000);
-  await rejects(
-    log,
-    "session edit after expiry",
-    () =>
-      harness.call(
-        sessionAccount,
-        nativeSite,
-        "edit",
-        { token_id: SLOTS.nativeA, page_hash: "after-expiry" },
-        { gas: 50n * ONE_TGAS },
-      ),
-    /NotSlotEditor|NotSlotOwner/,
-  );
+  await Promise.race([
+    rejects(
+      log,
+      "session edit after expiry",
+      () =>
+        harness.call(
+          sessionAccount,
+          nativeSite,
+          "edit",
+          { token_id: SLOTS.nativeA, page_hash: "after-expiry" },
+          { gas: 50n * ONE_TGAS },
+        ),
+      /NotSlotEditor|NotSlotOwner/,
+    ),
+    new Promise((_, fail) =>
+      setTimeout(() => fail(new Error("expiry rejection timed out after 90s")), 90_000),
+    ),
+  ]);
   check(
     log,
     "tenant_of clears at expiry",

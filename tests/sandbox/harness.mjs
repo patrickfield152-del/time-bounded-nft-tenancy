@@ -246,13 +246,38 @@ export class SandboxHarness {
     });
   }
 
-  /** Advance the chain by `deltaHeight` blocks (and their block time). */
+  /**
+   * Advance the chain by `deltaHeight` blocks (and their block time).
+   *
+   * A single 8,000-block jump blocks the RPC longer than the client timeout on
+   * a 1-vCPU box, so the jump is chunked and each chunk waits until `status`
+   * reports the new height. The loop is bounded: a chunk that does not advance
+   * the chain within 30 s fails loudly instead of hanging the run.
+   */
   async fastForward(deltaHeight) {
-    const height = Number(deltaHeight);
-    if (!Number.isSafeInteger(height) || height <= 0) {
+    const total = Number(deltaHeight);
+    if (!Number.isSafeInteger(total) || total <= 0) {
       throw new Error(`fastForward needs a positive integer, got ${deltaHeight}`);
     }
-    await this.rpc("sandbox_fast_forward", { delta_height: height });
+    const before = Number((await this.rpc("status")).sync_info.latest_block_height);
+    let remaining = total;
+    while (remaining > 0) {
+      const chunk = Math.min(remaining, 500);
+      await this.rpc("sandbox_fast_forward", { delta_height: chunk });
+      remaining -= chunk;
+      const target = before + total - remaining;
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        const height = Number((await this.rpc("status")).sync_info.latest_block_height);
+        if (height >= target) break;
+        if (Date.now() > deadline) {
+          throw new Error(
+            `fastForward stalled at block ${height}, wanted ${target} (delta ${total})`,
+          );
+        }
+        await new Promise((settle) => setTimeout(settle, 250));
+      }
+    }
   }
 
   /**
