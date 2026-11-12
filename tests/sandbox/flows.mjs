@@ -271,7 +271,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
       keys: [SLOTS.nativeA, SLOTS.nativeB],
       floors: [NATIVE_FLOOR.toString(), (NATIVE_FLOOR * 2n).toString()],
     },
-    { deposit: 20n * ONE_NEAR },
+    { deposit: 20n * ONE_NEAR, gas: 1000n * ONE_TGAS },
   );
   step(log, "factory.create_site native", nativeCreate);
   const nativeTerms = await harness.view(IDS.nativeSite, "terms");
