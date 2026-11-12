@@ -533,13 +533,18 @@ export async function runMarketFlows(ctx, harness) {
   check(log, "tenant page hash is live", editedSlot.page_hash === tenantHash);
 
   await harness.fastForward(8_000);
+  // The jump moves the chain past the transaction-validity horizon relative to
+  // the block hash the old Account captured, so the post-expiry edit must be
+  // signed by a fresh Account built after one finalized block is observed.
+  await harness.provider.viewBlock({ finality: "final" });
+  const expiredSession = new Account(carol.accountId, harness.provider, session.toString());
   await Promise.race([
     rejects(
       log,
       "session edit after expiry",
       () =>
         harness.call(
-          sessionAccount,
+          expiredSession,
           nativeSite,
           "edit",
           { token_id: SLOTS.nativeA, page_hash: "after-expiry" },
