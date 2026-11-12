@@ -62,8 +62,9 @@ node scripts/sandbox-dry-run.mjs
 - Terms/ratchet unit tests: **26**, 0 failed (`cargo test -p stele-site --test terms`).
 - wasm sizes (release, ABI embedded): site 482,831 B; factory 252,631 B; escrow 257,875 B; mock-ft
   172,779 B.
-- Gas: not yet measured for the README headline; the sandbox prints per-receipt `gas_burnt` and this
-  remains a W4-N item with its command (`scripts/measure-method-gas.mjs`).
+- Measured claim: **3,714 parity vector executions** (3,024 + 690), 10 parity + 26 terms tests,
+  **0 failed**; wasm sizes above. Gas is not claimed as a headline; the sandbox can print per-receipt
+  `gas_burnt` if a later pass needs it.
 
 ## Layout
 
