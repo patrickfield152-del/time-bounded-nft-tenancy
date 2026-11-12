@@ -8,14 +8,14 @@
 //! registration, the floor/ask levers, `buy`/`buy_for` with the storage gate,
 //! the pull ledger and the admin setters.
 //!
-//! Tenancy methods (`list_for_rent`, `rent`, `extend_rental`, `claim_rent`,
-//! `end_rental`, `edit`, `set_editor` and the tenancy views) live in wave 3.
-//! The `listings` and `rentals` maps are already state because a sale must
-//! clear a listing while an active rental survives it.
+//! Tenancy (`list_for_rent`, `rent`, `extend_rental`, `claim_rent`, `end_rental`,
+//! `edit`, `can_edit`, `set_editor`, `editor_of`) lives here too. A sale settles
+//! the outgoing owner's rent and clears the listing, while the term itself
+//! survives it: a tenancy a take could destroy would be unsellable.
 //!
 //! Module map:
 //! - [`pricing`]: the pure `U256` money math (parity target).
-//! - [`rentals`]: the pure rent math (wave 3 consumes it).
+//! - [`rentals`]: the pure rent math and its state-machine predicates.
 //! - [`terms`]: the configuration clamps and holder-safe ratchets.
 //! - [`events`]: the 39 ported NEP-297 events.
 //! - [`transfer_hook`]: approval revocation before storage accounting.
@@ -35,7 +35,7 @@ pub use transfer_hook::SiteTransferHook;
 use std::borrow::Cow;
 
 use near_sdk::borsh::BorshSerialize;
-use near_sdk::json_types::U128;
+use near_sdk::json_types::{U128, U64};
 use near_sdk::store::{LookupMap, Vector};
 use near_sdk::utils::{assert_one_yocto, is_promise_success};
 use near_sdk::{
@@ -209,10 +209,20 @@ pub struct Contract {
 /// market spine, the pull ledger and the admin setters.
 #[near]
 impl Contract {
-    /// Origin `initialize`. `min_slot_floor` is supplied by the factory from
-    /// the settlement asset's real decimals (native 24 => `10^20`, 6-decimal
-    /// mock FT => `100`); `new` never reads `ft_metadata` because that call is
-    /// asynchronous.
+    /// Origin `initialize`, plus the two factory-supplied treasury fields.
+    ///
+    /// `min_slot_floor` is supplied by the factory from the settlement asset's
+    /// real decimals (native 24 => `10^20`, 6-decimal mock FT => `100`); `new`
+    /// never reads `ft_metadata` because that call is asynchronous.
+    ///
+    /// **Doc deviation (documented):** the origin took a treasury address that
+    /// the owner could repoint until a factory pinned it afterwards. On NEAR
+    /// the factory creates an escrowed site whose `Owner` derive slot is the
+    /// publisher, not the factory, so a post-create owner call cannot pin it
+    /// atomically. `new` therefore accepts `treasury` (default:
+    /// `protocol_treasury`) and `treasury_pinned` so `create_escrowed_site`
+    /// can pin the vault in the same receipt as the deploy. A pinned site's
+    /// `set_treasury` refuses to repoint.
     #[init]
     pub fn new(
         owner_id: AccountId,
@@ -220,6 +230,8 @@ impl Contract {
         protocol_bps: u64,
         protocol_rent_bps: u64,
         settlement_ft: Option<AccountId>,
+        treasury: Option<AccountId>,
+        treasury_pinned: bool,
         config: SiteConfig,
         keys: Vec<TokenId>,
         floors: Vec<U128>,
@@ -229,7 +241,7 @@ impl Contract {
         terms::check_config_absolute(&config);
         require!(min_slot_floor.0 != 0, "InvalidFloor");
 
-        let treasury = protocol_treasury.clone();
+        let treasury = treasury.unwrap_or_else(|| protocol_treasury.clone());
         let mut contract = Self {
             protocol_treasury,
             protocol_bps,
@@ -240,7 +252,7 @@ impl Contract {
             paused: false,
             open_registration: false,
             treasury,
-            treasury_pinned: false,
+            treasury_pinned,
             default_floor: min_slot_floor,
             min_slot_floor,
             treasury_royalty_bps: 0,
@@ -641,6 +653,307 @@ impl Contract {
         self.treasury_royalty_bps = bps;
         SteleEvent::RoyaltySet { bps }.emit();
     }
+
+    // ---------------------------------------------------------------- tenancy
+
+    /// Origin `listForRent`: the owner publishes a daily rate and a duration
+    /// cap. `rate_per_day == 0` delists. One yocto so a leaked function-call
+    /// key cannot reprice a listing.
+    #[payable]
+    pub fn list_for_rent(
+        &mut self,
+        token_id: TokenId,
+        rate_per_day: U128,
+        max_duration_secs: u64,
+    ) {
+        let owner = self
+            .token_owner(&token_id)
+            .unwrap_or_else(|| env::panic_str("NotSlotOwner"));
+        require!(owner == env::predecessor_account_id(), "NotSlotOwner");
+        assert_one_yocto();
+        let slot = self
+            .slots
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("SlotNotRegistered"));
+        require!(slot.registered, "SlotNotRegistered");
+
+        if rate_per_day.0 == 0 {
+            self.listings.remove(&token_id);
+            SteleEvent::RentalListed {
+                token_id,
+                owner,
+                rate_per_day: U128(0),
+                max_duration_secs: 0,
+            }
+            .emit();
+            return;
+        }
+
+        // `site_rent_bps` is freely mutable, so the band is re-checked here: the
+        // fee snapshotted below is what the tenant will actually be charged.
+        terms::check_rent_terms(&self.config, self.protocol_rent_bps);
+        require!(
+            rentals::duration_ok(max_duration_secs, self.config.max_rental_term_secs),
+            "TermTooLong"
+        );
+        let effective_floor = self.take_quote(&slot).effective_floor;
+        require!(
+            rentals::hourly_floor(
+                U256::from(rate_per_day.0),
+                self.config.min_rent_bps,
+                effective_floor,
+            ),
+            "RateBelowFloor"
+        );
+
+        // A live tenancy never has its rate rewritten under it. The owner's
+        // escape valve while a term runs is to delist (rate 0), which blocks
+        // `extend_rental` without touching the term already paid for.
+        if let Some(rental) = self.rentals.get(&token_id) {
+            require!(env::block_timestamp() >= rental.expiry, "RentalActive");
+        }
+
+        let fee_bps = u16::try_from(self.config.site_rent_bps)
+            .unwrap_or_else(|_| env::panic_str("InvalidConfig"));
+        self.listings.insert(
+            token_id.clone(),
+            Listing {
+                rate_per_day,
+                max_duration_secs,
+                fee_bps,
+            },
+        );
+        SteleEvent::RentalListed {
+            token_id,
+            owner,
+            rate_per_day,
+            max_duration_secs,
+        }
+        .emit();
+    }
+
+    /// Origin `rent`, native branch: opens a term against the owner's listing.
+    /// Anyone may rent; the attached deposit is a budget (the change is
+    /// credited back) and the gross cost splits into protocol, site and the
+    /// escrowed net.
+    ///
+    /// An existing rental entry blocks a new term even after it lapses —
+    /// permissionless `end_rental` is what returns the slot to the market.
+    /// The FT branch is `ft_on_transfer` calling [`Contract::rent_inner`].
+    #[payable]
+    pub fn rent(&mut self, token_id: TokenId, duration_secs: u64, expected_rate_per_day: U128) {
+        require!(self.settlement_ft.is_none(), "NativeNotAccepted");
+        let payer = env::predecessor_account_id();
+        let refund = self.rent_inner(
+            &payer,
+            &payer,
+            token_id,
+            duration_secs,
+            expected_rate_per_day,
+            env::attached_deposit().as_yoctonear(),
+        );
+        // The shared path books native change to `payer` and returns zero; this
+        // guard keeps the wrapper's promise local so an overpayment can never be
+        // dropped here even if that routing changes.
+        if refund.0 != 0 {
+            self.credit(&payer, refund);
+        }
+    }
+
+    /// Origin `extendRental`, native branch: the tenant buys the NEXT window at
+    /// the listing's current rate. The cap binds the remaining window (the term
+    /// restarts from now), so repeated extensions can never push a buyer past
+    /// the listing's advertised term.
+    ///
+    /// Settle-then-restart: the outgoing term is flushed first, then its
+    /// unearned remainder rolls forward as the carry of a fresh linear term.
+    /// The FT branch is `ft_on_transfer` calling [`Contract::extend_inner`].
+    #[payable]
+    pub fn extend_rental(
+        &mut self,
+        token_id: TokenId,
+        duration_secs: u64,
+        expected_rate_per_day: U128,
+    ) {
+        require!(self.settlement_ft.is_none(), "NativeNotAccepted");
+        let payer = env::predecessor_account_id();
+        let refund = self.extend_inner(
+            &payer,
+            &payer,
+            token_id,
+            duration_secs,
+            expected_rate_per_day,
+            env::attached_deposit().as_yoctonear(),
+        );
+        // Same contract as `rent`: the wrapper never drops a refund.
+        if refund.0 != 0 {
+            self.credit(&payer, refund);
+        }
+    }
+
+    /// Origin `claimRent`: permissionless, and always credits the CURRENT owner
+    /// rather than the caller, so a keeper can sweep a whole directory without
+    /// knowing who owns what.
+    pub fn claim_rent(&mut self, token_id: TokenId) {
+        let amount = self.settle_rent(&token_id, env::block_timestamp());
+        require!(amount.0 != 0, "NothingToWithdraw");
+        let owner = self
+            .token_owner(&token_id)
+            .unwrap_or_else(|| env::panic_str("NotSlotOwner"));
+        SteleEvent::RentClaimed {
+            token_id,
+            owner,
+            amount,
+        }
+        .emit();
+    }
+
+    /// Origin `endRental`: permissionless once the term lapses. The unclaimed
+    /// remainder is settled to the owner FIRST (the term is about to be
+    /// dropped), then the owner's content hash is restored and the tenancy
+    /// cleared so the slot can be rented again.
+    pub fn end_rental(&mut self, token_id: TokenId) {
+        let now_ns = env::block_timestamp();
+        let rental = self
+            .rentals
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("NotForRent"));
+        require!(now_ns >= rental.expiry, "RentalActive");
+        self.settle_rent(&token_id, now_ns);
+
+        let mut slot = self
+            .slots
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("SlotNotRegistered"));
+        slot.page_hash = rental.owner_hash_snapshot.clone();
+        // Bumped so the restore flows through the same content gate as an edit:
+        // the render path must not have a second way in.
+        slot.content_version = slot
+            .content_version
+            .checked_add(1)
+            .unwrap_or_else(|| env::panic_str("ContentVersionOverflow"));
+        self.slots.insert(token_id.clone(), slot);
+        self.rentals.remove(&token_id);
+        self.sync_token_expiry(&token_id, None);
+
+        SteleEvent::RentalEnded {
+            token_id: token_id.clone(),
+            restored_hash: rental.owner_hash_snapshot,
+        }
+        .emit();
+        SteleEvent::TenancyChanged {
+            token_id,
+            tenant: None,
+            expiry_ns: U64::from(0u64),
+        }
+        .emit();
+    }
+
+    /// Origin `edit`: the FCK-gated content write. NON-payable on purpose — a
+    /// function-call key cannot attach a deposit, so a leaked session key can
+    /// never move money, and the contract-side tenancy check is authoritative.
+    pub fn edit(&mut self, token_id: TokenId, page_hash: String) {
+        let editor = env::predecessor_account_id();
+        if !self.can_edit(token_id.clone(), editor.clone()) {
+            if self.token_owner(&token_id).is_none() {
+                env::panic_str("NotSlotOwner");
+            }
+            env::panic_str("NotSlotEditor");
+        }
+        let mut slot = self
+            .slots
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("SlotNotRegistered"));
+        slot.page_hash = page_hash.clone();
+        slot.content_version = slot
+            .content_version
+            .checked_add(1)
+            .unwrap_or_else(|| env::panic_str("ContentVersionOverflow"));
+        let content_version = slot.content_version;
+        self.slots.insert(token_id.clone(), slot);
+        SteleEvent::SlotEdited {
+            token_id,
+            editor,
+            page_hash,
+            content_version,
+            timestamp_ns: env::block_timestamp().into(),
+        }
+        .emit();
+    }
+
+    /// Origin `canEdit`: during a live term the TENANT edits and the owner is
+    /// locked out. Otherwise the owner, or a grant that the current owner made
+    /// and that no take has invalidated.
+    pub fn can_edit(&self, token_id: TokenId, account: AccountId) -> bool {
+        let Some(owner) = self.token_owner(&token_id) else {
+            return false;
+        };
+        if let Some(rental) = self.rentals.get(&token_id) {
+            if env::block_timestamp() < rental.expiry {
+                return account == rental.tenant;
+            }
+        }
+        if account == owner {
+            return true;
+        }
+        let Some(slot) = self.slots.get(&token_id) else {
+            return false;
+        };
+        match self.editor_grants.get(&token_id) {
+            Some(grant) => {
+                grant.editor == account
+                    && grant.grantor == owner
+                    && grant.granted_at_takes == slot.takes
+            }
+            None => false,
+        }
+    }
+
+    /// Origin `setEditor`: one yocto, owner only. The grant records the take
+    /// counter, so the next sale kills it without a cleanup call.
+    #[payable]
+    pub fn set_editor(&mut self, token_id: TokenId, editor: AccountId) {
+        let owner = self
+            .token_owner(&token_id)
+            .unwrap_or_else(|| env::panic_str("NotSlotOwner"));
+        require!(owner == env::predecessor_account_id(), "NotSlotOwner");
+        assert_one_yocto();
+        let slot = self
+            .slots
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("SlotNotRegistered"));
+        let granted_at_takes = slot.takes;
+        self.editor_grants.insert(
+            token_id.clone(),
+            EditorGrant {
+                editor: editor.clone(),
+                grantor: owner.clone(),
+                granted_at_takes,
+            },
+        );
+        SteleEvent::EditorSet {
+            token_id,
+            editor,
+            grantor: owner,
+            granted_at_takes,
+        }
+        .emit();
+    }
+
+    /// Origin `editorOf`: the granted editor, but only while the grant is live.
+    pub fn editor_of(&self, token_id: TokenId) -> Option<AccountId> {
+        let grant = self.editor_grants.get(&token_id)?;
+        if self.can_edit(token_id, grant.editor.clone()) {
+            Some(grant.editor.clone())
+        } else {
+            None
+        }
+    }
 }
 
 /// Internals: validation, pricing at the boundary, booking and payout. These
@@ -844,6 +1157,10 @@ impl Contract {
         plan: &BuyPlan,
     ) {
         let now_ns = env::block_timestamp();
+        // Doc C48: a sale settles the outgoing owner's rent before the split
+        // credits them the payout. The tenancy itself survives the sale; only
+        // the listing is cleared below.
+        self.settle_rent(token_id, now_ns);
 
         if let Some(previous_owner) = &plan.previous_owner {
             self.credit(previous_owner, plan.payout);
@@ -938,6 +1255,315 @@ impl Contract {
             metadata = metadata.expires_at(expiry_ns / NS_PER_MS);
         }
         metadata
+    }
+
+    /// Mirrors a live tenancy into NEP-177 `expires_at` (milliseconds) without
+    /// touching the rest of the token metadata; `None` clears the field alone.
+    /// The unchecked setter is the right one here: the token exists (a tenancy
+    /// requires an owner), and clearing a field needs the `Option` form that
+    /// `set_token_metadata` does not take.
+    fn sync_token_expiry(&mut self, token_id: &TokenId, expires_at_ns: Option<u64>) {
+        let Some(mut metadata) = self.token_metadata(token_id) else {
+            return;
+        };
+        metadata.expires_at = expires_at_ns.map(|ns| U64::from(ns / NS_PER_MS));
+        self.set_token_metadata_unchecked(token_id, Some(&metadata));
+    }
+
+    /// Books what a term has earned into the CURRENT owner's pull ledger and
+    /// marks it claimed. Returns the delta moved out of rent escrow; an absent
+    /// or cleared term returns zero.
+    ///
+    /// Shared by `claim_rent`, `extend_rental`, `end_rental` and `execute_buy`,
+    /// so every path that can change who is owed the stream flushes it first.
+    /// Accrual is linear over the term and clamps at expiry, which makes the
+    /// lapsed-term settle drain the escrow to exactly zero.
+    pub(crate) fn settle_rent(&mut self, token_id: &TokenId, now_ns: u64) -> U128 {
+        let Some(mut rental) = self.rentals.get(token_id).cloned() else {
+            return U128(0);
+        };
+        if rental.expiry == 0 {
+            return U128(0);
+        }
+        // Seconds, exactly like the origin and the parity vectors; truncating
+        // both term bounds by the same divisor keeps `expiry - start` exact.
+        let accrued = rentals::accrued_of(
+            U256::from(rental.prepaid.0),
+            rental.start / NS_PER_SEC,
+            rental.expiry / NS_PER_SEC,
+            now_ns / NS_PER_SEC,
+        );
+        let accrued = pricing::to_u128(accrued, "accrued rent");
+        let delta = accrued
+            .checked_sub(rental.claimed.0)
+            .unwrap_or_else(|| env::panic_str("RentClaimUnderflow"));
+        if delta == 0 {
+            return U128(0);
+        }
+
+        rental.claimed = U128(accrued);
+        self.rentals.insert(token_id.clone(), rental);
+        self.total_escrowed_rent = U128(
+            self.total_escrowed_rent
+                .0
+                .checked_sub(delta)
+                .unwrap_or_else(|| env::panic_str("RentEscrowUnderflow")),
+        );
+        let owner = self
+            .token_owner(token_id)
+            .unwrap_or_else(|| env::panic_str("NotSlotOwner"));
+        self.credit(&owner, U128(delta));
+        U128(delta)
+    }
+
+    /// Routes an overpayment. On a native site the money is already inside
+    /// this contract and a value return cannot pay NEAR, so it becomes a
+    /// pull-ledger credit; on an FT site the amount goes back to
+    /// `ft_on_transfer`, which returns it to the sender. The branches are
+    /// disjoint by construction: `rent`/`extend_rental` require a native site
+    /// and `ft_on_transfer` refuses one.
+    fn refund_or_credit(&mut self, payer: &AccountId, refund: u128) -> U128 {
+        if self.settlement_ft.is_none() {
+            if refund > 0 {
+                self.credit(payer, U128(refund));
+            }
+            U128(0)
+        } else {
+            U128(refund)
+        }
+    }
+
+    /// Shared `rent` path: `paid` is the native attached deposit or the FT
+    /// amount, `tenant` the renter, `payer` the account the change is owed to.
+    /// Returns what `ft_on_transfer` must hand back (zero on the native path,
+    /// where [`Contract::refund_or_credit`] books it instead).
+    pub(crate) fn rent_inner(
+        &mut self,
+        payer: &AccountId,
+        tenant: &AccountId,
+        token_id: TokenId,
+        duration_secs: u64,
+        expected_rate_per_day: U128,
+        paid: u128,
+    ) -> U128 {
+        require!(!self.paused, "Paused");
+        // Cannot rent an unclaimed position: there is nobody to pay.
+        require!(self.token_owner(&token_id).is_some(), "NotSlotOwner");
+        require!(self.rentals.get(&token_id).is_none(), "RentalActive");
+
+        let listing = self
+            .listings
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("NotForRent"));
+        require!(listing.rate_per_day.0 != 0, "NotForRent");
+        require!(listing.rate_per_day == expected_rate_per_day, "RateChanged");
+        require!(
+            rentals::duration_ok(duration_secs, listing.max_duration_secs),
+            "TermTooLong"
+        );
+
+        let cost = pricing::to_u128(
+            rentals::rent_cost(U256::from(listing.rate_per_day.0), duration_secs),
+            "rent cost",
+        );
+        require!(paid >= cost, "InsufficientPayment");
+        let refund = paid - cost;
+
+        let split = rentals::rent_split(
+            U256::from(cost),
+            self.protocol_rent_bps,
+            u64::from(listing.fee_bps),
+        );
+        let protocol_cut = pricing::to_u128(split.protocol_cut, "protocol rent cut");
+        let site_cut = pricing::to_u128(split.site_cut, "site rent cut");
+        let net = pricing::to_u128(split.net, "escrowed rent");
+        if protocol_cut != 0 {
+            let protocol_treasury = self.protocol_treasury.clone();
+            self.credit(&protocol_treasury, U128(protocol_cut));
+        }
+        self.treasury_balance = U128(
+            self.treasury_balance
+                .0
+                .checked_add(site_cut)
+                .unwrap_or_else(|| env::panic_str("LedgerOverflow")),
+        );
+        self.total_escrowed_rent = U128(
+            self.total_escrowed_rent
+                .0
+                .checked_add(net)
+                .unwrap_or_else(|| env::panic_str("RentEscrowOverflow")),
+        );
+
+        let now_ns = env::block_timestamp();
+        let duration_ns = duration_secs
+            .checked_mul(NS_PER_SEC)
+            .unwrap_or_else(|| env::panic_str("ExpiryOverflow"));
+        let expiry_ns = now_ns
+            .checked_add(duration_ns)
+            .unwrap_or_else(|| env::panic_str("ExpiryOverflow"));
+        let slot = self
+            .slots
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("SlotNotRegistered"));
+        self.rentals.insert(
+            token_id.clone(),
+            Rental {
+                tenant: tenant.clone(),
+                start: now_ns,
+                expiry: expiry_ns,
+                prepaid: U128(net),
+                claimed: U128(0),
+                owner_hash_snapshot: slot.page_hash,
+            },
+        );
+        self.sync_token_expiry(&token_id, Some(expiry_ns));
+
+        SteleEvent::SlotRented {
+            token_id: token_id.clone(),
+            tenant: tenant.clone(),
+            expiry_ns: U64::from(expiry_ns),
+            cost: U128(cost),
+        }
+        .emit();
+        SteleEvent::TenancyChanged {
+            token_id,
+            tenant: Some(tenant.clone()),
+            expiry_ns: U64::from(expiry_ns),
+        }
+        .emit();
+
+        self.refund_or_credit(payer, refund)
+    }
+
+    /// Shared `extend_rental` path. Settle-then-restart: the outgoing term is
+    /// flushed first, then its unearned remainder rolls forward as the carry of
+    /// a fresh linear term. The cap binds the remaining window.
+    pub(crate) fn extend_inner(
+        &mut self,
+        payer: &AccountId,
+        tenant: &AccountId,
+        token_id: TokenId,
+        duration_secs: u64,
+        expected_rate_per_day: U128,
+        paid: u128,
+    ) -> U128 {
+        require!(!self.paused, "Paused");
+        let now_ns = env::block_timestamp();
+        let rental = self
+            .rentals
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("RentalExpired"));
+        require!(now_ns < rental.expiry, "RentalExpired");
+        require!(&rental.tenant == tenant, "NotSlotTenant");
+
+        let listing = self
+            .listings
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("NotForRent"));
+        require!(listing.rate_per_day.0 != 0, "NotForRent");
+        require!(listing.rate_per_day == expected_rate_per_day, "RateChanged");
+        require!(
+            rentals::duration_ok(
+                duration_secs,
+                listing
+                    .max_duration_secs
+                    .min(self.config.max_rental_term_secs),
+            ),
+            "TermTooLong"
+        );
+
+        // Flush what the outgoing term earned before its numbers move; the
+        // carry is what it never earned, so it must not be refunded.
+        self.settle_rent(&token_id, now_ns);
+        let rental = self
+            .rentals
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("RentalExpired"));
+        let carry = pricing::to_u128(
+            rentals::extend_carry(
+                U256::from(rental.prepaid.0),
+                U256::from(rental.claimed.0),
+                rental.start / NS_PER_SEC,
+                rental.expiry / NS_PER_SEC,
+                now_ns / NS_PER_SEC,
+            ),
+            "rent carry",
+        );
+
+        let cost = pricing::to_u128(
+            rentals::rent_cost(U256::from(listing.rate_per_day.0), duration_secs),
+            "rent cost",
+        );
+        require!(paid >= cost, "InsufficientPayment");
+        let refund = paid - cost;
+
+        let split = rentals::rent_split(
+            U256::from(cost),
+            self.protocol_rent_bps,
+            u64::from(listing.fee_bps),
+        );
+        let protocol_cut = pricing::to_u128(split.protocol_cut, "protocol rent cut");
+        let site_cut = pricing::to_u128(split.site_cut, "site rent cut");
+        let net = pricing::to_u128(split.net, "escrowed rent");
+        if protocol_cut != 0 {
+            let protocol_treasury = self.protocol_treasury.clone();
+            self.credit(&protocol_treasury, U128(protocol_cut));
+        }
+        self.treasury_balance = U128(
+            self.treasury_balance
+                .0
+                .checked_add(site_cut)
+                .unwrap_or_else(|| env::panic_str("LedgerOverflow")),
+        );
+        self.total_escrowed_rent = U128(
+            self.total_escrowed_rent
+                .0
+                .checked_add(net)
+                .unwrap_or_else(|| env::panic_str("RentEscrowOverflow")),
+        );
+
+        let prepaid = carry
+            .checked_add(net)
+            .unwrap_or_else(|| env::panic_str("RentEscrowOverflow"));
+        let duration_ns = duration_secs
+            .checked_mul(NS_PER_SEC)
+            .unwrap_or_else(|| env::panic_str("ExpiryOverflow"));
+        let expiry_ns = now_ns
+            .checked_add(duration_ns)
+            .unwrap_or_else(|| env::panic_str("ExpiryOverflow"));
+        self.rentals.insert(
+            token_id.clone(),
+            Rental {
+                tenant: tenant.clone(),
+                start: now_ns,
+                expiry: expiry_ns,
+                prepaid: U128(prepaid),
+                claimed: U128(0),
+                owner_hash_snapshot: rental.owner_hash_snapshot,
+            },
+        );
+        self.sync_token_expiry(&token_id, Some(expiry_ns));
+
+        SteleEvent::RentalExtended {
+            token_id: token_id.clone(),
+            tenant: tenant.clone(),
+            expiry_ns: U64::from(expiry_ns),
+            cost: U128(cost),
+        }
+        .emit();
+        SteleEvent::TenancyChanged {
+            token_id,
+            tenant: Some(tenant.clone()),
+            expiry_ns: U64::from(expiry_ns),
+        }
+        .emit();
+
+        self.refund_or_credit(payer, refund)
     }
 
     /// `max(bounds.min - total, token_bytes - available)`, where one token's

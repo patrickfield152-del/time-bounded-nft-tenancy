@@ -4,6 +4,9 @@
 //! Rates are per DAY, durations are in SECONDS, and nothing here moves money: the site contract
 //! books the legs. Pure functions stay in seconds exactly like the vector grid; the contract
 //! converts nanoseconds only at its boundary.
+//!
+//! The three state-machine predicates at the bottom are the guards the site applies around
+//! [`rent_cost`]/[`rent_split`]: they return a verdict or an amount and never mutate anything.
 
 use primitive_types::U256;
 
@@ -68,4 +71,37 @@ pub fn rent_split(cost: U256, protocol_rent_bps: u64, fee_bps: u64) -> RentSplit
     let protocol_cut = mul(cost, U256::from(protocol_rent_bps)) / U256::from(BPS_DENOMINATOR);
     let site_cut = mul(cost, U256::from(fee_bps)) / U256::from(BPS_DENOMINATOR);
     RentSplit { protocol_cut, site_cut, net: sub(sub(cost, protocol_cut), site_cut) }
+}
+
+/// True when `duration_secs` sits inside `[MIN_RENTAL_DURATION, max_duration_secs]`.
+///
+/// Mirrors the `TermTooLong` half of `RentalsLib.list`/`open`/`extend`: the floor keeps a per-day
+/// rate from being charged against an unrepresentably short term, and the ceiling is the caller's
+/// cap — `max_rental_term_secs` for a listing, the listing's own `max_duration_secs` for a rent or
+/// an extension. A cap of zero (no listing) admits nothing.
+pub fn duration_ok(duration_secs: u64, max_duration_secs: u64) -> bool {
+    duration_secs >= MIN_RENTAL_DURATION && duration_secs <= max_duration_secs
+}
+
+/// Mirrors the `RateBelowFloor` half of `RentalsLib.list`: a daily rate must clear
+/// `effective_floor * min_rent_bps / 10_000`.
+///
+/// Keyed to the EFFECTIVE floor, not `base_price`, so the rent floor tracks the same decayed number
+/// the take price uses. `min_rent_bps` is the site's rent floor in bps of that floor, validated to
+/// `(0, 10_000]`.
+pub fn hourly_floor(rate_per_day: U256, min_rent_bps: u64, effective_floor: U256) -> bool {
+    rate_per_day >= mul(effective_floor, U256::from(min_rent_bps)) / U256::from(BPS_DENOMINATOR)
+}
+
+/// The carry a settled restart takes forward: `prepaid` minus everything the term has earned, or
+/// already claimed, whichever is larger.
+///
+/// The site settles first, so `claimed == accrued` on entry and the result is exactly
+/// [`accrual`]'s `unaccrued` leg: rent the tenant paid for but the term never earned, which must
+/// roll into the new term rather than be refunded. `claimed > prepaid` (or an accrual above
+/// `prepaid`) is an invariant violation and panics like every other subtraction here.
+pub fn extend_carry(prepaid: U256, claimed: U256, start: u64, expiry: u64, now_ts: u64) -> U256 {
+    let accrued = accrued_of(prepaid, start, expiry, now_ts);
+    let settled = if claimed > accrued { claimed } else { accrued };
+    sub(prepaid, settled)
 }

@@ -57,7 +57,7 @@ export interface SessionKey {
  * whatever the caller persists it in). Nothing in this package stores it.
  */
 export function newSessionKey(): SessionKey {
-  const keyPair = KeyPair.fromRandom('ed25519');
+  const keyPair = KeyPair.fromRandom();
   return { publicKey: keyPair.getPublicKey().toString(), keyPair };
 }
 
@@ -111,5 +111,5 @@ export async function revokeSessionKey(tenant: Account, publicKey: string): Prom
  * rejected by the protocol before the contract runs.
  */
 export function sessionAccount(tenantId: AccountId, session: SessionKey, rpcUrl: string): Account {
-  return new Account(tenantId, rpcUrl, session.keyPair);
+  return new Account(tenantId, rpcUrl, session.keyPair.toString());
 }

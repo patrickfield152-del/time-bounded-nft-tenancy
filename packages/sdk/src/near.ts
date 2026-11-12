@@ -19,9 +19,9 @@
 import {
   Account,
   JsonRpcProvider,
-  KeyPair,
   actions,
   type BlockReference,
+  type KeyPairString,
   type RpcTransactionResponse,
 } from 'near-api-js';
 
@@ -117,18 +117,18 @@ export function readerFromEnv(env: Record<string, string | undefined> = process.
  */
 export function accountFromKey(options: {
   accountId: AccountId;
-  privateKey: string;
+  privateKey: KeyPairString;
   rpcUrl: string;
 }): Account {
   assertValidAccountId(options.accountId);
-  return new Account(options.accountId, options.rpcUrl, KeyPair.fromString(options.privateKey));
+  return new Account(options.accountId, options.rpcUrl, options.privateKey);
 }
 
 /** A signing account from `NEAR_ACCOUNT_ID`, `NEAR_PRIVATE_KEY` and `NEAR_RPC_URL`. */
 export function accountFromEnv(env: Record<string, string | undefined> = process.env): Account {
   return accountFromKey({
     accountId: requiredEnv(env, 'NEAR_ACCOUNT_ID', 'the account that signs transactions'),
-    privateKey: requiredEnv(env, 'NEAR_PRIVATE_KEY', 'the signing key for NEAR_ACCOUNT_ID'),
+    privateKey: requiredEnv(env, 'NEAR_PRIVATE_KEY', 'the signing key for NEAR_ACCOUNT_ID') as KeyPairString,
     rpcUrl: requiredEnv(env, 'NEAR_RPC_URL', 'the JSON-RPC endpoint the SDK writes to'),
   });
 }

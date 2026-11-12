@@ -4,9 +4,20 @@
   "version": "0.1.0",
   "description": "NEP-171 slot NFTs with time-bounded function-call-key tenancy and NEP-141 settlement.",
   "license": "MIT",
+  "scripts": {
+    "sandbox:dry-run": "node scripts/sandbox-dry-run.mjs",
+    "test:sandbox": "vitest run tests/sandbox"
+  },
   "packageManager": "pnpm@10.4.1",
   "engines": {
     "node": ">=22.22.2",
     "pnpm": ">=10.4.1"
+  },
+  "devDependencies": {
+    "near-api-js": "7.5.3",
+    "near-sandbox": "0.3.5",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vitest": "4.1.10"
   }
 }

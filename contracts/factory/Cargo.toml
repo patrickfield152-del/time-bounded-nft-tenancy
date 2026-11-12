@@ -14,3 +14,9 @@ near-sdk = { workspace = true }
 near-sdk-contract-tools = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The factory speaks the site's and vault's own argument types instead of
+# duplicating them: `SiteConfig` is the site's init config and `EscrowParams`
+# is the vault's bind policy. Both are rlib path deps (never the cdylib side),
+# so the types stay single-source.
+stele-site = { path = "../site" }
+stele-escrow = { path = "../escrow" }

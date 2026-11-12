@@ -1,6 +1,7 @@
-//! Read-only surface: the market views, the SDK's one-call `terms`, and the
-//! `encumbrance_hash` whose preimage the SDK must reproduce byte for byte.
-//! State changes live in `lib.rs`, the FT entry point in `ft_receiver.rs`.
+//! Read-only surface: the market views, the tenancy tuple, the SDK's one-call
+//! `terms`, and the `encumbrance_hash` whose preimage the SDK must reproduce
+//! byte for byte. State changes live in `lib.rs`, the FT entry point in
+//! `ft_receiver.rs`.
 //!
 //! `quote` and `encumbrance_hash` are the two reads a buyer needs pinned to
 //! the same block as the purchase: `quote` is the price both the SDK and
@@ -12,8 +13,8 @@ use near_sdk::{env, near, AccountId};
 use near_sdk_contract_tools::nft::Nep171Controller;
 use primitive_types::U256;
 
-use crate::pricing;
-use crate::{Contract, ContractExt, Listing, Quote, Rental, Slot, TokenId};
+use crate::rentals;
+use crate::{pricing, Contract, ContractExt, Listing, Quote, Rental, Slot, TokenId, NS_PER_SEC};
 
 /// The site terms the SDK reads in one call (one RPC instead of a dozen).
 #[near(serializers = [json])]
@@ -41,6 +42,9 @@ pub struct TermsView {
     pub terms_locked: bool,
     pub default_floor: U128,
     pub treasury: AccountId,
+    /// The factory pins the treasury for escrowed sites; a vault's `bind`
+    /// requires this true, so the terms view must carry it.
+    pub treasury_pinned: bool,
     /// Display-only ERC-2981 analog (`treasury_royalty_bps`).
     pub royalty_bps: u16,
 }
@@ -113,6 +117,53 @@ impl Contract {
         self.rentals.get(&token_id).cloned()
     }
 
+    /// Origin `userOf`: the live tenant, absent once the term has lapsed. An
+    /// expired-but-uncleared record reads as no tenancy, because the content
+    /// gate has already returned to the owner.
+    pub fn tenant_of(&self, token_id: TokenId) -> Option<AccountId> {
+        self.rentals
+            .get(&token_id)
+            .filter(|rental| env::block_timestamp() < rental.expiry)
+            .map(|rental| rental.tenant.clone())
+    }
+
+    /// Origin `userExpires`: the term's expiry in nanoseconds, `0` when there is
+    /// none. Raw, so a lapsed record still reports the timestamp it ended at.
+    pub fn tenant_expires(&self, token_id: TokenId) -> u64 {
+        self.rentals
+            .get(&token_id)
+            .map(|rental| rental.expiry)
+            .unwrap_or(0)
+    }
+
+    /// Origin `accruedRent`: what the term has earned so far, claimed or not.
+    pub fn accrued_rent(&self, token_id: TokenId) -> U128 {
+        let Some(rental) = self.rentals.get(&token_id) else {
+            return U128(0);
+        };
+        let accrued = rentals::accrued_of(
+            U256::from(rental.prepaid.0),
+            rental.start / NS_PER_SEC,
+            rental.expiry / NS_PER_SEC,
+            env::block_timestamp() / NS_PER_SEC,
+        );
+        U128(pricing::to_u128(accrued, "accrued rent"))
+    }
+
+    /// Origin `unaccruedRent`: the unearned remainder — what a buyer inherits.
+    pub fn unaccrued_rent(&self, token_id: TokenId) -> U128 {
+        let Some(rental) = self.rentals.get(&token_id) else {
+            return U128(0);
+        };
+        let accrual = rentals::accrual(
+            U256::from(rental.prepaid.0),
+            rental.start / NS_PER_SEC,
+            rental.expiry / NS_PER_SEC,
+            env::block_timestamp() / NS_PER_SEC,
+        );
+        U128(pricing::to_u128(accrual.unaccrued, "unaccrued rent"))
+    }
+
     pub fn pending_withdrawals(&self, account: AccountId) -> U128 {
         self.pending_withdrawals
             .get(&account)
@@ -152,6 +203,7 @@ impl Contract {
             terms_locked: self.terms_locked,
             default_floor: self.default_floor,
             treasury: self.treasury.clone(),
+            treasury_pinned: self.treasury_pinned,
             royalty_bps: self.treasury_royalty_bps,
         }
     }

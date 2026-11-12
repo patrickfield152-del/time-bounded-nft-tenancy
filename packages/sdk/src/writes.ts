@@ -572,6 +572,11 @@ export interface BuildCreateSiteOptions {
    */
   owner?: AccountId;
   /**
+   * Settlement asset for the site. Omit for native NEAR; pass the mock FT's account id for an
+   * FT-settled site. The factory derives `min_slot_floor` from this asset's decimals.
+   */
+  settlementToken?: AccountId;
+  /**
    * Attached deposit in yoctoNEAR. Read `get_required(args)` from the factory: it must cover the
    * new account's state AND its code storage, and only the factory knows the wasm size.
    */
@@ -674,6 +679,7 @@ export function buildCreateSite(options: BuildCreateSiteOptions): CallRequest {
   const { config, keys, floors } = siteConfigOf(options);
   const args: Record<string, unknown> = {
     site_id: options.siteId,
+    settlement_token: options.settlementToken ?? null,
     config,
     keys,
     floors,
