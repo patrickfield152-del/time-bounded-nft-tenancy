@@ -532,6 +532,10 @@ export async function runMarketFlows(ctx, harness) {
   });
   check(log, "tenant page hash is live", editedSlot.page_hash === tenantHash);
 
+  // `sandbox_fast_forward` advances height only; block timestamps do not move,
+  // so a timestamp-based rental expiry cannot be reached here. The expiry,
+  // end_rental and hash-restore assertions are W4 items; everything else runs.
+  if (process.env.STELE_SKIP_EXPIRY !== "1") {
   await harness.fastForward(8_000);
   // The jump moves the chain past the transaction-validity horizon relative to
   // the block hash the old Account captured, so the post-expiry edit must be
@@ -562,6 +566,7 @@ export async function runMarketFlows(ctx, harness) {
     (await harness.view(nativeSite, "tenant_of", { token_id: SLOTS.nativeA })) ===
       null,
   );
+  }
 
   const bobPendingBeforeClaim = await pendingOf(harness, nativeSite, bob.accountId);
   const claimRentTx = await harness.call(carol, nativeSite, "claim_rent", {
@@ -576,6 +581,7 @@ export async function runMarketFlows(ctx, harness) {
     `${bobPendingBeforeClaim} -> ${bobPendingAfterClaim}`,
   );
 
+  if (process.env.STELE_SKIP_EXPIRY !== "1") {
   const endTx = await harness.call(carol, nativeSite, "end_rental", {
     token_id: SLOTS.nativeA,
   });
@@ -604,6 +610,7 @@ export async function runMarketFlows(ctx, harness) {
       }),
     /NothingToWithdraw/,
   );
+  }
 
   const deleteTx = await carol.deleteKey(session.getPublicKey());
   step(log, "delete FCK", deleteTx);
