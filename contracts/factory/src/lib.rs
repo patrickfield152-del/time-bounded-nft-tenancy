@@ -36,8 +36,37 @@ use near_sdk::{
 use near_sdk::borsh::BorshSerialize;
 use near_sdk_contract_tools::owner::Owner as OwnerTrait;
 use near_sdk_contract_tools::Owner;
-use stele_escrow::EscrowParams;
-use stele_site::SiteConfig;
+
+/// The site's init config, duplicated here as wire shape only: a contract that
+/// depends on another contract crate inherits its ABI symbols and the
+/// `near-sdk/__abi-generate` link step then sees duplicate `__near_abi_*`
+/// definitions. The JSON field set is identical to `stele_site::SiteConfig`.
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SiteConfig {
+    pub take_bps: u64,
+    pub payout_bps: u64,
+    pub reversion_bps: u64,
+    pub max_reversion_weeks: u32,
+    pub cooldown_secs: u64,
+    pub floor_delta_bps: u64,
+    pub floor_change_cooldown_secs: u64,
+    pub max_ask_bps: u64,
+    pub min_rent_bps: u64,
+    pub site_rent_bps: u64,
+    pub max_rental_term_secs: u64,
+}
+
+/// The vault's bind policy, duplicated for the same ABI reason; wire-identical
+/// to `stele_escrow::EscrowParams`.
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EscrowParams {
+    pub window_secs: u64,
+    pub claim_delay_secs: u64,
+    pub min_transition_secs: u64,
+    pub min_booking: U128,
+}
 
 /// Storage price per byte: 1e19 yocto (1 NEAR = 10^24 yocto, so 10^5 bytes
 /// per NEAR). Code storage is the dominant cost of a factory deployment.
@@ -329,6 +358,7 @@ impl Contract {
     pub fn create_escrowed_site(
         &mut self,
         vault_id: AccountId,
+        owner_id: AccountId,
         site_id: AccountId,
         settlement_token: Option<AccountId>,
         config: SiteConfig,
@@ -337,7 +367,7 @@ impl Contract {
     ) -> Promise {
         let payer = env::predecessor_account_id();
         self.create_escrowed_site_inner(
-            payer.clone(),
+            owner_id,
             payer,
             vault_id,
             site_id,
@@ -639,7 +669,7 @@ impl Contract {
                 "new".to_owned(),
                 args,
                 NearToken::from_yoctonear(0),
-                Gas::from_tgas(50),
+                Gas::from_tgas(60),
             )
             .then(
                 Promise::new(env::current_account_id()).function_call(
@@ -653,7 +683,7 @@ impl Contract {
                     .to_string()
                     .into_bytes(),
                     NearToken::from_yoctonear(0),
-                    Gas::from_tgas(20),
+                    Gas::from_tgas(50),
                 ),
             )
     }

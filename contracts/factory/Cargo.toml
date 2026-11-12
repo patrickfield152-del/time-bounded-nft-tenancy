@@ -14,9 +14,7 @@ near-sdk = { workspace = true }
 near-sdk-contract-tools = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# The factory speaks the site's and vault's own argument types instead of
-# duplicating them: `SiteConfig` is the site's init config and `EscrowParams`
-# is the vault's bind policy. Both are rlib path deps (never the cdylib side),
-# so the types stay single-source.
-stele-site = { path = "../site" }
-stele-escrow = { path = "../escrow" }
+# No dependency on the site or escrow contract crates: cargo-near builds every
+# dependency with `near-sdk/__abi-generate`, and two contract crates in one
+# graph export duplicate `__near_abi_*` symbols, which fails the link step.
+# The two wire types are declared locally with identical JSON shapes.

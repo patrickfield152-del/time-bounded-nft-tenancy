@@ -107,7 +107,7 @@ pub struct PendingBind {
 /// A claim that has booked and is walking the asynchronous checks. One slot:
 /// a second `claim` is refused until the first resolves, which is what keeps
 /// the immature pool stable between the check phase and the credit.
-#[near(serializers = [borsh])]
+#[near(serializers = [json, borsh])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClaimPlan {
     pub token_id: TokenId,
@@ -285,6 +285,7 @@ impl Contract {
                     Gas::from_tgas(25),
                 ),
             )
+            .detach();
     }
 
     /// Private tail of `bind`: caches the publisher and books the initial
@@ -758,6 +759,7 @@ impl Contract {
     }
 }
 
+#[near]
 impl Contract {
     fn assert_bound(&self) {
         require!(self.site.is_some(), "NotBound");
@@ -861,6 +863,9 @@ impl Contract {
             .pending_claim
             .clone()
             .unwrap_or_else(|| env::panic_str("NoClaim"));
+        // The plan now travels in the next callback's arguments, so a failed
+        // check can no longer leave a stale marker that bricks every retry.
+        self.pending_claim = None;
         let holder = holder
             .unwrap_or_else(|_| env::panic_str("HolderUnavailable"))
             .unwrap_or_else(|| env::panic_str("NothingToClaim"));
@@ -881,7 +886,9 @@ impl Contract {
             .then(
                 Promise::new(env::current_account_id()).function_call(
                     "claim_slot_callback".to_owned(),
-                    b"{}".to_vec(),
+                    serde_json::json!({ "claim": claim })
+                        .to_string()
+                        .into_bytes(),
                     NearToken::from_yoctonear(0),
                     Gas::from_tgas(25),
                 ),
@@ -892,12 +899,9 @@ impl Contract {
     #[private]
     pub fn claim_slot_callback(
         &mut self,
+        claim: ClaimPlan,
         #[callback_result] slot: Result<Option<SlotState>, PromiseError>,
     ) {
-        let claim = self
-            .pending_claim
-            .clone()
-            .unwrap_or_else(|| env::panic_str("NoClaim"));
         let slot = slot
             .unwrap_or_else(|_| env::panic_str("SlotUnavailable"))
             .unwrap_or_else(|| env::panic_str("NothingToClaim"));

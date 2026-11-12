@@ -23,16 +23,15 @@ import {
   getTransactionLastResult,
   nearToYocto,
 } from "near-api-js";
-import {
-  DEFAULT_BALANCE,
-  DEFAULT_PRIVATE_KEY,
-  DEFAULT_PUBLIC_KEY,
-  GenesisAccount,
-  Sandbox,
-} from "near-sandbox";
+import { DEFAULT_ACCOUNT_ID, DEFAULT_PRIVATE_KEY, Sandbox } from "near-sandbox";
 
-/** The pre-funded root account every sandbox starts with. */
-export const ROOT_ACCOUNT = "test.near";
+/**
+ * The pre-funded root account every sandbox starts with. near-sandbox's
+ * genesis also carries a `test.near` account, but its key is generated per
+ * home and never written to disk; `sandbox` is the one whose key the package
+ * publishes, so it is the only account a harness can sign for from scratch.
+ */
+export const ROOT_ACCOUNT = DEFAULT_ACCOUNT_ID;
 /** near-sandbox's default nearcore build (package 0.3.5). */
 export const SANDBOX_VERSION = process.env.NEAR_SANDBOX_VERSION ?? "2.14.0";
 /** 1 NEAR in yoctoNEAR. */
@@ -135,17 +134,12 @@ export class SandboxHarness {
         "near-sandbox ships Linux/macOS binaries only; run the dry-run under WSL2",
       );
     }
+    // `test.near` is already in near-sandbox 0.3.5's default genesis (with the
+    // default key below). Adding it again fails genesis validation with
+    // "Duplicate account id test.near", so only the epoch length is tweaked.
     const sandbox = await Sandbox.start({
       version,
       config: {
-        additionalAccounts: [
-          new GenesisAccount(
-            ROOT_ACCOUNT,
-            DEFAULT_PUBLIC_KEY,
-            DEFAULT_PRIVATE_KEY,
-            DEFAULT_BALANCE,
-          ),
-        ],
         // Fast-forward crosses epoch boundaries in normal block-production
         // chunks; a long epoch keeps the 1-hour rental expiry cheap to reach.
         additionalGenesis: { epoch_length: 1_000 },
@@ -272,14 +266,33 @@ export class SandboxHarness {
     args = {},
     { gas = DEFAULT_GAS, deposit = 0n, waitUntil = "FINAL" } = {},
   ) {
-    const response = await signer.callFunctionRaw({
-      contractId,
-      methodName: method,
-      args,
-      gas: typeof gas === "bigint" ? gas : BigInt(gas),
-      deposit: typeof deposit === "bigint" ? deposit : BigInt(deposit),
-      waitUntil,
-    });
+    let response;
+    try {
+      response = await signer.callFunctionRaw({
+        contractId,
+        methodName: method,
+        args,
+        gas: typeof gas === "bigint" ? gas : BigInt(gas),
+        deposit: typeof deposit === "bigint" ? deposit : BigInt(deposit),
+        waitUntil,
+      });
+    } catch (error) {
+      const receipts = error?.transactionResult?.receipts_outcome ?? [];
+      console.error(
+        "[sandbox] failed receipts",
+        JSON.stringify(
+          receipts.map((r, i) => ({
+            i,
+            gas: r.outcome.gas_burnt,
+            status: r.outcome.status,
+            logs: (r.outcome.logs ?? []).slice(-2),
+          })),
+          null,
+          2,
+        ),
+      );
+      throw error;
+    }
     const receipts = Array.isArray(response.receipts_outcome)
       ? response.receipts_outcome
       : [];

@@ -57,7 +57,7 @@ export interface SessionKey {
  * whatever the caller persists it in). Nothing in this package stores it.
  */
 export function newSessionKey(): SessionKey {
-  const keyPair = KeyPair.fromRandom();
+  const keyPair = KeyPair.fromRandom('ed25519');
   return { publicKey: keyPair.getPublicKey().toString(), keyPair };
 }
 

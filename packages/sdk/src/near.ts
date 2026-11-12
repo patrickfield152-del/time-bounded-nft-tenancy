@@ -22,7 +22,6 @@ import {
   actions,
   type BlockReference,
   type KeyPairString,
-  type RpcTransactionResponse,
 } from 'near-api-js';
 
 /** A NEAR account id: `stele.testnet`, `demo.stele.testnet`, or a 64-hex implicit account. */
@@ -104,8 +103,20 @@ export function readerFromUrl(rpcUrl: string): Reader {
   return new JsonRpcProvider({ url: rpcUrl });
 }
 
+/**
+ * The ambient environment when the runtime has one. Read through `globalThis`
+ * so a browser build has no `process` reference: it sees an empty map and every
+ * `requiredEnv` call reports the variable it wanted.
+ */
+export function runtimeEnv(): Record<string, string | undefined> {
+  const runtime = globalThis as {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return runtime.process?.env ?? {};
+}
+
 /** A reader from `NEAR_RPC_URL`. */
-export function readerFromEnv(env: Record<string, string | undefined> = process.env): Reader {
+export function readerFromEnv(env: Record<string, string | undefined> = runtimeEnv()): Reader {
   return readerFromUrl(requiredEnv(env, 'NEAR_RPC_URL', 'the JSON-RPC endpoint the SDK reads'));
 }
 
@@ -125,7 +136,7 @@ export function accountFromKey(options: {
 }
 
 /** A signing account from `NEAR_ACCOUNT_ID`, `NEAR_PRIVATE_KEY` and `NEAR_RPC_URL`. */
-export function accountFromEnv(env: Record<string, string | undefined> = process.env): Account {
+export function accountFromEnv(env: Record<string, string | undefined> = runtimeEnv()): Account {
   return accountFromKey({
     accountId: requiredEnv(env, 'NEAR_ACCOUNT_ID', 'the account that signs transactions'),
     privateKey: requiredEnv(env, 'NEAR_PRIVATE_KEY', 'the signing key for NEAR_ACCOUNT_ID') as KeyPairString,
@@ -187,7 +198,7 @@ export const DEFAULT_GAS = 30_000_000_000_000n;
  * For scripts and the sandbox harness. A browser app should hand `toWalletCall(request)` to the
  * wallet instead, so the user sees what they are approving.
  */
-export async function submit(account: Account, request: CallRequest): Promise<RpcTransactionResponse> {
+export async function submit(account: Account, request: CallRequest) {
   return account.signAndSendTransaction({
     receiverId: request.contractId,
     actions: [

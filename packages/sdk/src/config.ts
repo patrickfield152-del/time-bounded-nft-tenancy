@@ -19,6 +19,7 @@ import {
   assertValidAccountId,
   readerFromUrl,
   requiredEnv,
+  runtimeEnv,
   type AccountId,
   type Reader,
 } from './near';
@@ -193,7 +194,7 @@ export interface SteleNetwork {
  * `NEAR_FT_ACCOUNT` is optional and its absence means native settlement: a site with a token is a
  * different deployment plan, not a different build.
  */
-export function readNetwork(env: Record<string, string | undefined> = process.env): SteleNetwork {
+export function readNetwork(env: Record<string, string | undefined> = runtimeEnv()): SteleNetwork {
   const factory = requiredEnv(env, 'NEAR_FACTORY_ACCOUNT', 'the factory that deploys sites');
   const site = requiredEnv(env, 'NEAR_SITE_ACCOUNT', 'the site this app renders');
   const vault = requiredEnv(env, 'NEAR_VAULT_ACCOUNT', 'the escrow vault bound to that site');

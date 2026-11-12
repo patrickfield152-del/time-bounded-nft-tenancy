@@ -451,6 +451,13 @@ export async function readBuyContext(
     );
   }
 
+  const expectedTerms = await readView<string>(
+    reader,
+    site,
+    'encumbrance_hash',
+    { token_id: slotKey(key) },
+    pinned,
+  );
   return { slot, expectedTerms, nowNs: clock.timestampNs, blockHeight: clock.height };
 }
 

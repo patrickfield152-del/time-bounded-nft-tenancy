@@ -30,13 +30,13 @@ const REPO_ROOT = resolve(HERE, "..", "..");
 const ONE_YOCTO = 1n;
 /** Contract ids and account ids used by every scenario. */
 export const IDS = {
-  factory: "factory.test.near",
-  ft: "ft.test.near",
-  treasury: "treasury.test.near",
-  nativeSite: "alpha.factory.test.near",
-  ftSite: "ft.factory.test.near",
-  escrowSite: "escrow.factory.test.near",
-  escrowVault: "vault.factory.test.near",
+  factory: "factory.sandbox",
+  ft: "ft.sandbox",
+  treasury: "treasury.sandbox",
+  nativeSite: "alpha.factory.sandbox",
+  ftSite: "ft.factory.sandbox",
+  escrowSite: "escrow.factory.sandbox",
+  escrowVault: "vault.factory.sandbox",
 };
 /** Readable slot keys are the token ids (documented deviation from the origin). */
 export const SLOTS = {
@@ -222,7 +222,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
   const escrowBytes = await readFile(paths.escrow);
 
   const storeSite = await harness.call(
-    harness.root,
+    factory.account,
     IDS.factory,
     "store_site_code",
     { code: Array.from(siteBytes) },
@@ -230,7 +230,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
   );
   step(log, "factory.store_site_code", storeSite);
   const storeEscrow = await harness.call(
-    harness.root,
+    factory.account,
     IDS.factory,
     "store_escrow_code",
     { code: Array.from(escrowBytes) },
@@ -239,7 +239,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
   step(log, "factory.store_escrow_code", storeEscrow);
 
   const allowFt = await harness.call(
-    harness.root,
+    factory.account,
     IDS.factory,
     "allow_token",
     { token: IDS.ft, decimals: 6 },
@@ -253,10 +253,10 @@ export async function deployAll(harness, { log = console.log } = {}) {
     min_booking: "1",
   };
   const paramsTx = await harness.call(
-    harness.root,
+    factory.account,
     IDS.factory,
     "set_escrow_params",
-    escrowParams,
+    { params: escrowParams },
   );
   step(log, "factory.set_escrow_params", paramsTx);
 
@@ -311,6 +311,7 @@ export async function deployAll(harness, { log = console.log } = {}) {
     "create_escrowed_site",
     {
       site_id: IDS.escrowSite,
+      owner_id: alice.accountId,
       vault_id: IDS.escrowVault,
       settlement_token: null,
       config: SITE_CONFIG,
@@ -752,7 +753,7 @@ export async function runEscrowFlows(ctx, harness) {
     (await harness.view(escrowVault, "mature", { id: 1 })) === false,
   );
 
-  const darkTx = await harness.call(harness.root, IDS.factory, "mark_dark", {
+  const darkTx = await harness.call(factory.account, IDS.factory, "mark_dark", {
     vault_id: escrowVault,
   });
   step(log, "factory.mark_dark", darkTx);
@@ -805,7 +806,7 @@ export async function runEscrowFlows(ctx, harness) {
     `${claimPendingBefore} -> ${claimPendingAfter}`,
   );
 
-  const clearTx = await harness.call(harness.root, IDS.factory, "clear_dark", {
+  const clearTx = await harness.call(factory.account, IDS.factory, "clear_dark", {
     vault_id: escrowVault,
   });
   step(log, "factory.clear_dark", clearTx);

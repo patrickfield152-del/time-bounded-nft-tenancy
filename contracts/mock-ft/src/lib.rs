@@ -57,6 +57,7 @@ impl Contract {
             min: NearToken::from_millinear(10),
             max: None,
         });
+        contract
     }
 
     /// Owner-only mint, event-emitting (`ft_mint` via the NEP-141 controller).

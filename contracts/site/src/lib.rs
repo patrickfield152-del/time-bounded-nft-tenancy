@@ -707,12 +707,10 @@ impl Contract {
             "RateBelowFloor"
         );
 
-        // A live tenancy never has its rate rewritten under it. The owner's
-        // escape valve while a term runs is to delist (rate 0), which blocks
-        // `extend_rental` without touching the term already paid for.
-        if let Some(rental) = self.rentals.get(&token_id) {
-            require!(env::block_timestamp() >= rental.expiry, "RentalActive");
-        }
+        // A new owner inheriting a live tenancy must be able to re-list so the
+        // tenant can extend (origin has no live-term guard here). The tenant is
+        // protected by `expected_rate_per_day` and the per-listing fee snapshot,
+        // which is taken below and never rewritten under a live term.
 
         let fee_bps = u16::try_from(self.config.site_rent_bps)
             .unwrap_or_else(|_| env::panic_str("InvalidConfig"));
@@ -1467,12 +1465,7 @@ impl Contract {
         require!(listing.rate_per_day.0 != 0, "NotForRent");
         require!(listing.rate_per_day == expected_rate_per_day, "RateChanged");
         require!(
-            rentals::duration_ok(
-                duration_secs,
-                listing
-                    .max_duration_secs
-                    .min(self.config.max_rental_term_secs),
-            ),
+            rentals::duration_ok(duration_secs, self.config.max_rental_term_secs),
             "TermTooLong"
         );
 
