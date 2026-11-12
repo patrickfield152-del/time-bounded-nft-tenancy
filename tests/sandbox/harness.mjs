@@ -283,6 +283,7 @@ export class SandboxHarness {
         JSON.stringify(
           receipts.map((r, i) => ({
             i,
+            executor: r.executor_id,
             gas: r.outcome.gas_burnt,
             status: r.outcome.status,
             logs: (r.outcome.logs ?? []).slice(-2),

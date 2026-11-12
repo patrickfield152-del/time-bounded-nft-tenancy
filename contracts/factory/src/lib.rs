@@ -683,7 +683,7 @@ impl Contract {
                     .to_string()
                     .into_bytes(),
                     NearToken::from_yoctonear(0),
-                    Gas::from_tgas(50),
+                    Gas::from_tgas(80),
                 ),
             )
     }
