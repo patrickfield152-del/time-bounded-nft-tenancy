@@ -49,6 +49,24 @@ pub struct TermsView {
     pub royalty_bps: u16,
 }
 
+/// One-shot read for a slot and everything the SDK composes around it.
+///
+/// Additive by construction: every field is the exact wire shape of its
+/// standalone view (`slot_of`, `quote`, `owner_of_or_zero`, `listing_of`,
+/// `rental_of`), so existing clients keep working and the bundle can be
+/// compared field-for-field in tests. Registration is not an error here:
+/// `slot` is `None` and `quote` is the same zero quote the standalone view
+/// returns, which lets the SDK keep the actionable "not registered" sentence.
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlotBundle {
+    pub slot: Option<Slot>,
+    pub quote: Quote,
+    pub owner: Option<AccountId>,
+    pub listing: Option<Listing>,
+    pub rental: Option<Rental>,
+}
+
 #[near]
 impl Contract {
     /// Origin `quote`: `(effective floor, take price)` for one slot. An
@@ -195,6 +213,18 @@ impl Contract {
         }
     }
 
+    /// The five slot reads a page or a buy needs, against one block and one
+    /// receipt. Additive view: the individual methods are unchanged.
+    pub fn slot_bundle(&self, token_id: TokenId) -> SlotBundle {
+        SlotBundle {
+            quote: self.quote(token_id.clone()),
+            slot: self.slots.get(&token_id).cloned(),
+            owner: self.token_owner(&token_id),
+            listing: self.listings.get(&token_id).cloned(),
+            rental: self.rentals.get(&token_id).cloned(),
+        }
+    }
+
     /// Origin `royaltyInfo`: `(treasury, bps * sale_price / 10_000)`,
     /// truncating, and never deducted from a sale. The origin signature
     /// ignored `token_id`, so this one takes only the price.
@@ -227,34 +257,40 @@ impl Contract {
     /// 32 bytes. The digest is hex-encoded lowercase (64 characters). The SDK
     /// must build the same preimage: no field reordering, no intermediate JSON.
     pub fn encumbrance_hash(&self, token_id: TokenId) -> String {
-        let (base_price, registered) = self
-            .slots
-            .get(&token_id)
-            .map(|slot| (slot.base_price.0, u8::from(slot.registered)))
-            .unwrap_or((0, 0));
-        let (tenant, expiry, prepaid, claimed) = match self.rentals.get(&token_id) {
-            Some(rental) => (
-                rental.tenant.as_str(),
-                rental.expiry,
-                rental.prepaid.0,
-                rental.claimed.0,
-            ),
-            None => ("", 0, 0, 0),
-        };
-
-        let tenant_bytes = tenant.as_bytes();
-        let tenant_length = u32::try_from(tenant_bytes.len())
-            .unwrap_or_else(|_| env::panic_str("AccountIdTooLong"));
-        let mut preimage = Vec::with_capacity(16 + 1 + 4 + tenant_bytes.len() + 8 + 16 + 16);
-        preimage.extend_from_slice(&base_price.to_be_bytes());
-        preimage.push(registered);
-        preimage.extend_from_slice(&tenant_length.to_be_bytes());
-        preimage.extend_from_slice(tenant_bytes);
-        preimage.extend_from_slice(&expiry.to_be_bytes());
-        preimage.extend_from_slice(&prepaid.to_be_bytes());
-        preimage.extend_from_slice(&claimed.to_be_bytes());
+        let preimage =
+            encumbrance_preimage(self.slots.get(&token_id), self.rentals.get(&token_id));
         to_hex(&env::sha256(&preimage))
     }
+}
+
+/// The exact bytes `encumbrance_hash` hashes: `Option` is part of the contract,
+/// not an error. Shared with tests so the layout has one definition.
+pub fn encumbrance_preimage(slot: Option<&Slot>, rental: Option<&Rental>) -> Vec<u8> {
+    let (base_price, registered) = slot
+        .map(|slot| (slot.base_price.0, u8::from(slot.registered)))
+        .unwrap_or((0, 0));
+    let (tenant, expiry, prepaid, claimed) = match rental {
+        Some(rental) => (
+            rental.tenant.as_str(),
+            rental.expiry,
+            rental.prepaid.0,
+            rental.claimed.0,
+        ),
+        None => ("", 0, 0, 0),
+    };
+
+    let tenant_bytes = tenant.as_bytes();
+    let tenant_length = u32::try_from(tenant_bytes.len())
+        .unwrap_or_else(|_| env::panic_str("AccountIdTooLong"));
+    let mut preimage = Vec::with_capacity(16 + 1 + 4 + tenant_bytes.len() + 8 + 16 + 16);
+    preimage.extend_from_slice(&base_price.to_be_bytes());
+    preimage.push(registered);
+    preimage.extend_from_slice(&tenant_length.to_be_bytes());
+    preimage.extend_from_slice(tenant_bytes);
+    preimage.extend_from_slice(&expiry.to_be_bytes());
+    preimage.extend_from_slice(&prepaid.to_be_bytes());
+    preimage.extend_from_slice(&claimed.to_be_bytes());
+    preimage
 }
 
 /// Lowercase hex, no allocation per byte.

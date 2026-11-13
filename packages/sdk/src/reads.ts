@@ -1,11 +1,14 @@
 /**
- * The read path — one round of parallel views per page, no indexer and no reader contract.
+ * The read path — one bundle per slot, no indexer and no reader contract.
  *
  * The origin deployed a separate `SlotReader` because a view inside a site can only read that site
  * and its enriched per-slot fields were expensive to compose on chain. On NEAR the equivalent is
- * this module: one `slot_of`, one `quote`, one `owner_of_or_zero`, one `listing_of` and one
- * `rental_of` per key, issued together, so a twelve-slot page is still two round trips (one block
- * for the clock, one wave of views) rather than sixty.
+ * `slot_bundle`: one view returns the slot, quote, owner, listing and rental, so a twelve-slot page
+ * is still two round trips (one block for the clock, one wave of bundles) rather than sixty.
+ *
+ * **The buy guard is computed from the same bundle.** `encumbranceHash` hashes the records the
+ * bundle returned, using the contract's byte layout, so the value passed to `buy` cannot describe a
+ * different read than the price the buyer was shown.
  *
  * **Tenancy liveness is computed here, not asked for.** `rental_of` carries the term the contract
  * stores; whether it is live is `now < expiry`, and `now` is the CHAIN's clock. The same read gives
@@ -15,6 +18,7 @@
  * **Timestamps are nanoseconds at the contract boundary.** `Slot` and `Rental` keep ns; the pure
  * math in `./rentals` stays in seconds, so the conversion happens exactly once, here.
  */
+import { sha256Hex } from './content';
 import { slotKey } from './keys';
 import { readClock, readView, type AccountId, type QueryBlock, type Reader } from './near';
 import type { SiteEconomics } from './pricing';
@@ -121,6 +125,20 @@ export interface RentalRecord {
   owner_hash_snapshot: string;
 }
 
+/** The site's `slot_bundle` result, on the wire.
+ *
+ * Additive view: `slot`, `quote`, `owner`, `listing` and `rental` are the exact
+ * shapes of their standalone methods, so a caller can compare them field for
+ * field. `slot === null` is an unregistered key, not an RPC failure.
+ */
+export interface SlotBundleView {
+  slot: SlotRecord | null;
+  quote: QuoteView;
+  owner: AccountId | null;
+  listing: ListingRecord | null;
+  rental: RentalRecord | null;
+}
+
 /** The site's `terms` result, on the wire. */
 export interface TermsView {
   implementation_version: number;
@@ -197,57 +215,128 @@ function nsToSeconds(value: bigint): bigint {
   return value / NS_PER_SECOND;
 }
 
+const U128_MAX = (1n << 128n) - 1n;
+const U64_MAX = (1n << 64n) - 1n;
+
+function assertUnsigned(value: bigint, max: bigint, field: string): void {
+  if (value < 0n || value > max) {
+    throw new RangeError(`stele/reads: ${field} ${value} does not fit in an unsigned wire integer`);
+  }
+}
+
+function writeU64BE(view: DataView, offset: number, value: bigint): void {
+  assertUnsigned(value, U64_MAX, 'u64');
+  view.setBigUint64(offset, value, false);
+}
+
+function writeU128BE(view: DataView, offset: number, value: bigint): void {
+  assertUnsigned(value, U128_MAX, 'u128');
+  view.setBigUint64(offset, value >> 64n, false);
+  view.setBigUint64(offset + 8, value & U64_MAX, false);
+}
+
 /**
- * One slot at a pinned clock. The internal shape every public read funnels through.
+ * The exact preimage `encumbrance_hash` hashes on chain, and the counterpart of
+ * `encumbrance_preimage` in `contracts/site/src/views.rs`.
+ *
+ * ```
+ * [16B base_price u128][1B registered][4B len u32][lenB tenant UTF-8]
+ * [8B expiry u64][16B prepaid u128][16B claimed u128]
+ * ```
+ *
+ * The length prefix makes the variable-width account id unambiguous. Computed
+ * from the same `slot_bundle` records the buy used, so the guard cannot disagree
+ * with the state it was read from.
  */
-async function readSlotAt(
+export function encumbrancePreimage(
+  slot: Pick<SlotRecord, 'base_price' | 'registered'> | null,
+  rental: Pick<RentalRecord, 'tenant' | 'expiry' | 'prepaid' | 'claimed'> | null,
+): Uint8Array {
+  const tenant = new TextEncoder().encode(rental?.tenant ?? '');
+  if (tenant.length > 0xffff_ffff) {
+    throw new RangeError(`stele/reads: tenant id is ${tenant.length} bytes, over the u32 prefix`);
+  }
+
+  const bytes = new Uint8Array(16 + 1 + 4 + tenant.length + 8 + 16 + 16);
+  const view = new DataView(bytes.buffer);
+  writeU128BE(view, 0, fromU128(slot?.base_price ?? '0'));
+  bytes[16] = slot?.registered ? 1 : 0;
+  view.setUint32(17, tenant.length, false);
+  bytes.set(tenant, 21);
+  let offset = 21 + tenant.length;
+  writeU64BE(view, offset, u64(rental?.expiry ?? 0));
+  offset += 8;
+  writeU128BE(view, offset, fromU128(rental?.prepaid ?? '0'));
+  offset += 16;
+  writeU128BE(view, offset, fromU128(rental?.claimed ?? '0'));
+  return bytes;
+}
+
+/** `sha256(encumbrancePreimage(...))` as lowercase hex — the value `buy` expects. */
+export function encumbranceHash(
+  slot: Pick<SlotRecord, 'base_price' | 'registered'> | null,
+  rental: Pick<RentalRecord, 'tenant' | 'expiry' | 'prepaid' | 'claimed'> | null,
+): string {
+  return sha256Hex(encumbrancePreimage(slot, rental));
+}
+
+/**
+ * One slot, plus the encumbrance the buy guard needs, from a single
+ * `slot_bundle` call. The bundle replaces five separate views; the hash is
+ * computed here from the same records, so it cannot describe a different read.
+ */
+interface SlotRead {
+  state: SlotState;
+  /** `null` for an unregistered key, which has no quote and cannot be bought. */
+  expectedTerms: string | null;
+}
+
+async function readSlotDataAt(
   reader: Reader,
   site: AccountId,
   key: string,
   nowNs: bigint,
   blockQuery?: QueryBlock,
-): Promise<SlotState> {
+): Promise<SlotRead> {
   const tokenId = slotKey(key);
-  const record = await readView<SlotRecord | null>(reader, site, 'slot_of', { token_id: tokenId }, blockQuery);
+  const bundle = await readView<SlotBundleView>(reader, site, 'slot_bundle', { token_id: tokenId }, blockQuery);
+  const record = bundle.slot;
 
   if (record === null) {
     // A key that was never registered. `quote` is not defined for it, so asking would be an RPC
     // error dressed up as a slot state; the honest answer is a row that says "not registered".
     return {
-      key,
-      tokenId,
-      owner: null,
-      contentHash: null,
-      floor: 0n,
-      effectiveFloor: 0n,
-      lastPrice: 0n,
-      askFloor: 0n,
-      lastPurchaseNs: 0n,
-      contentVersion: 0,
-      takes: 0,
-      registered: false,
-      isAvailable: false,
-      isUnclaimed: true,
-      charged: 0n,
-      tenant: null,
-      rentalExpiryNs: 0n,
-      unaccruedRent: 0n,
-      netCost: 0n,
-      isFreeCarry: false,
-      isRented: false,
-      ratePerDay: 0n,
-      maxDurationSecs: 0n,
-      isListed: false,
+      state: {
+        key,
+        tokenId,
+        owner: null,
+        contentHash: null,
+        floor: 0n,
+        effectiveFloor: 0n,
+        lastPrice: 0n,
+        askFloor: 0n,
+        lastPurchaseNs: 0n,
+        contentVersion: 0,
+        takes: 0,
+        registered: false,
+        isAvailable: false,
+        isUnclaimed: true,
+        charged: 0n,
+        tenant: null,
+        rentalExpiryNs: 0n,
+        unaccruedRent: 0n,
+        netCost: 0n,
+        isFreeCarry: false,
+        isRented: false,
+        ratePerDay: 0n,
+        maxDurationSecs: 0n,
+        isListed: false,
+      },
+      expectedTerms: null,
     };
   }
 
-  const [quote, owner, listing, rental] = await Promise.all([
-    readView<QuoteView>(reader, site, 'quote', { token_id: tokenId }, blockQuery),
-    readView<AccountId | null>(reader, site, 'owner_of_or_zero', { token_id: tokenId }, blockQuery),
-    readView<ListingRecord | null>(reader, site, 'listing_of', { token_id: tokenId }, blockQuery),
-    readView<RentalRecord | null>(reader, site, 'rental_of', { token_id: tokenId }, blockQuery),
-  ]);
-
+  const { quote, owner, listing, rental } = bundle;
   const charged = fromU128(quote.price);
   const expiryNs = rental === null ? 0n : u64(rental.expiry);
   const isRented = rental !== null && expiryNs !== 0n && nowNs < expiryNs;
@@ -268,31 +357,44 @@ async function readSlotAt(
   const ratePerDay = listing === null ? 0n : fromU128(listing.rate_per_day);
 
   return {
-    key,
-    tokenId,
-    owner,
-    contentHash: record.page_hash === '' ? null : record.page_hash,
-    floor: fromU128(record.base_price),
-    effectiveFloor: fromU128(quote.effective_floor),
-    lastPrice: fromU128(record.last_price),
-    askFloor: fromU128(record.ask_floor),
-    lastPurchaseNs: u64(record.last_purchase_at_ns),
-    contentVersion: record.content_version,
-    takes: record.takes,
-    registered: record.registered,
-    isAvailable: record.available,
-    isUnclaimed: owner === null,
-    charged,
-    tenant: isRented && rental !== null ? rental.tenant : null,
-    rentalExpiryNs: expiryNs,
-    unaccruedRent,
-    netCost: isFreeCarry ? 0n : charged - unaccruedRent,
-    isFreeCarry,
-    isRented,
-    ratePerDay,
-    maxDurationSecs: listing === null ? 0n : u64(listing.max_duration_secs),
-    isListed: listing !== null && ratePerDay > 0n,
+    state: {
+      key,
+      tokenId,
+      owner,
+      contentHash: record.page_hash === '' ? null : record.page_hash,
+      floor: fromU128(record.base_price),
+      effectiveFloor: fromU128(quote.effective_floor),
+      lastPrice: fromU128(record.last_price),
+      askFloor: fromU128(record.ask_floor),
+      lastPurchaseNs: u64(record.last_purchase_at_ns),
+      contentVersion: record.content_version,
+      takes: record.takes,
+      registered: record.registered,
+      isAvailable: record.available,
+      isUnclaimed: owner === null,
+      charged,
+      tenant: isRented && rental !== null ? rental.tenant : null,
+      rentalExpiryNs: expiryNs,
+      unaccruedRent,
+      netCost: isFreeCarry ? 0n : charged - unaccruedRent,
+      isFreeCarry,
+      isRented,
+      ratePerDay,
+      maxDurationSecs: listing === null ? 0n : u64(listing.max_duration_secs),
+      isListed: listing !== null && ratePerDay > 0n,
+    },
+    expectedTerms: encumbranceHash(record, rental),
   };
+}
+
+async function readSlotAt(
+  reader: Reader,
+  site: AccountId,
+  key: string,
+  nowNs: bigint,
+  blockQuery?: QueryBlock,
+): Promise<SlotState> {
+  return (await readSlotDataAt(reader, site, key, nowNs, blockQuery)).state;
 }
 
 /**
@@ -436,28 +538,19 @@ export async function readBuyContext(
   const clock = await readClock(reader);
   const pinned: QueryBlock = { blockId: clock.height };
 
-  // Sequential rather than parallel, because `encumbrance_hash` on an unregistered key is the
-  // contract's business and may not answer: the registration check has to come first so a caller
-  // gets the actionable sentence instead of an RPC error.
-  const slot = await readSlotAt(reader, site, key, clock.timestampNs, pinned);
+  // One bundle carries the registration check, the quote and the rental records; the encumbrance is
+  // derived from those same records rather than fetched in a second round trip, so the guard and
+  // the displayed state cannot disagree. An unregistered key has no quote and no hash: refuse with
+  // the actionable sentence instead of building a free buy.
+  const { state: slot, expectedTerms } = await readSlotDataAt(reader, site, key, clock.timestampNs, pinned);
 
-  if (!slot.registered) {
-    // An unknown key has no `quote`: the contract auto-registers it at `default_floor` during
-    // `settle_buy` when registration is open, and rejects it otherwise. Returning the zero row
-    // `readSlots` uses for rendering would build a free buy, so the buy path refuses instead.
+  if (!slot.registered || expectedTerms === null) {
     throw new Error(
       `stele/reads: "${key}" is not registered on ${site} — registration is closed until the owner ` +
         'registers the key, and there is no quote to build a purchase from',
     );
   }
 
-  const expectedTerms = await readView<string>(
-    reader,
-    site,
-    'encumbrance_hash',
-    { token_id: slotKey(key) },
-    pinned,
-  );
   return { slot, expectedTerms, nowNs: clock.timestampNs, blockHeight: clock.height };
 }
 

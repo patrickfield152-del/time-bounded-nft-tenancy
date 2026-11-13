@@ -18,7 +18,9 @@
  */
 import {
   Account,
+  FailoverRpcProvider,
   JsonRpcProvider,
+  MultiKeySigner,
   actions,
   type BlockReference,
   type KeyPairString,
@@ -104,6 +106,23 @@ export function readerFromUrl(rpcUrl: string): Reader {
 }
 
 /**
+ * A reader for one or more endpoints.
+ *
+ * Two or more URLs use near-api-js's native `FailoverRpcProvider`, which walks
+ * the list in order and keeps the last provider that answered; this replaces a
+ * hand-rolled retry loop and its provider selection state. One URL is the same
+ * `JsonRpcProvider` `readerFromUrl` returns.
+ */
+export function readerFromUrls(rpcUrls: readonly string[]): Reader {
+  const urls = rpcUrls.map((url) => url.trim()).filter((url) => url !== '');
+  if (urls.length === 0) {
+    throw new Error('stele/near: at least one RPC URL is required to read the chain');
+  }
+  if (urls.length === 1) return readerFromUrl(urls[0]!);
+  return new FailoverRpcProvider(urls.map((url) => new JsonRpcProvider({ url })));
+}
+
+/**
  * The ambient environment when the runtime has one. Read through `globalThis`
  * so a browser build has no `process` reference: it sees an empty map and every
  * `requiredEnv` call reports the variable it wanted.
@@ -115,8 +134,14 @@ export function runtimeEnv(): Record<string, string | undefined> {
   return runtime.process?.env ?? {};
 }
 
-/** A reader from `NEAR_RPC_URL`. */
+
+/**
+ * A reader from `NEAR_RPC_URLS` (comma-separated failover list) when set,
+ * otherwise the single `NEAR_RPC_URL`.
+ */
 export function readerFromEnv(env: Record<string, string | undefined> = runtimeEnv()): Reader {
+  const urls = env.NEAR_RPC_URLS?.split(',').map((url) => url.trim()).filter((url) => url !== '');
+  if (urls !== undefined && urls.length > 0) return readerFromUrls(urls);
   return readerFromUrl(requiredEnv(env, 'NEAR_RPC_URL', 'the JSON-RPC endpoint the SDK reads'));
 }
 
@@ -135,8 +160,45 @@ export function accountFromKey(options: {
   return new Account(options.accountId, options.rpcUrl, options.privateKey);
 }
 
-/** A signing account from `NEAR_ACCOUNT_ID`, `NEAR_PRIVATE_KEY` and `NEAR_RPC_URL`. */
+/**
+ * An account that signs with several keys, rotating them through near-api-js's
+ * native `MultiKeySigner`.
+ *
+ * The keys must all be full-access keys on the same account; the signer picks
+ * the key per transaction, so parallel submissions get independent nonce lanes
+ * without local nonce bookkeeping. Use throwaway keys on any network that holds
+ * value.
+ */
+export function accountFromKeys(options: {
+  accountId: AccountId;
+  privateKeys: readonly KeyPairString[];
+  rpcUrl: string;
+}): Account {
+  assertValidAccountId(options.accountId);
+  if (options.privateKeys.length === 0) {
+    throw new Error('stele/near: accountFromKeys needs at least one signing key');
+  }
+  return new Account(
+    options.accountId,
+    options.rpcUrl,
+    MultiKeySigner.fromSecretKeys([...options.privateKeys]),
+  );
+}
+
+/** A signing account from `NEAR_ACCOUNT_ID` and either `NEAR_PRIVATE_KEYS`
+ * (comma-separated, native key rotation) or the single `NEAR_PRIVATE_KEY`, plus
+ * `NEAR_RPC_URL`. */
 export function accountFromEnv(env: Record<string, string | undefined> = runtimeEnv()): Account {
+  const keys = env.NEAR_PRIVATE_KEYS?.split(',')
+    .map((key) => key.trim())
+    .filter((key) => key !== '') as KeyPairString[] | undefined;
+  if (keys !== undefined && keys.length > 0) {
+    return accountFromKeys({
+      accountId: requiredEnv(env, 'NEAR_ACCOUNT_ID', 'the account that signs transactions'),
+      privateKeys: keys,
+      rpcUrl: requiredEnv(env, 'NEAR_RPC_URL', 'the JSON-RPC endpoint the SDK writes to'),
+    });
+  }
   return accountFromKey({
     accountId: requiredEnv(env, 'NEAR_ACCOUNT_ID', 'the account that signs transactions'),
     privateKey: requiredEnv(env, 'NEAR_PRIVATE_KEY', 'the signing key for NEAR_ACCOUNT_ID') as KeyPairString,

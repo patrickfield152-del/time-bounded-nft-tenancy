@@ -31,8 +31,10 @@ export {
   assertValidAccountId,
   requiredEnv,
   readerFromUrl,
+  readerFromUrls,
   readerFromEnv,
   accountFromKey,
+  accountFromKeys,
   accountFromEnv,
   readView,
   readClock,
@@ -111,6 +113,8 @@ export {
   readRegisteredSlotCount,
   readRegisteredSlotsPage,
   readRoyalty,
+  encumbrancePreimage,
+  encumbranceHash,
 } from './reads';
 export type {
   SlotState,
@@ -123,6 +127,7 @@ export type {
   BuyContext,
   Rental,
   Listing,
+  SlotBundleView,
 } from './reads';
 
 // Writes — request objects, never a wallet of our own.
