@@ -90,6 +90,13 @@ export function computeTakePrice(
   let decayed = lastPrice;
   for (let i = 0n; i < clampedWeeks; i++) {
     decayed = mul(decayed, decayBps) / BPS_DENOMINATOR;
+    // The floor is a hard clamp: once the decay reaches `basePrice`, every further week
+    // multiplies `basePrice` by less than one and stays there. The parity vectors confirm the
+    // result is identical, so the loop stops instead of burning weeks on a fixed value.
+    if (decayed <= basePrice) {
+      decayed = basePrice;
+      break;
+    }
   }
   const effectiveFloor = decayed > basePrice ? decayed : basePrice;
   const price = mul(effectiveFloor, takeBps) / BPS_DENOMINATOR;

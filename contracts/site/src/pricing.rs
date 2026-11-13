@@ -62,6 +62,14 @@ pub fn compute_take_price(
     let mut decayed = last_price;
     for _ in 0..clamped_weeks {
         decayed = mul(decayed, U256::from(decay_bps)) / U256::from(BPS_DENOMINATOR);
+        // The floor is a hard clamp: once the decay reaches `base_price`, every
+        // further week multiplies `base_price` by less than one and stays there.
+        // The parity vectors confirm the result is identical, and the loop stops
+        // instead of burning weeks on a value that cannot change.
+        if decayed <= base_price {
+            decayed = base_price;
+            break;
+        }
     }
     let effective_floor = if decayed > base_price { decayed } else { base_price };
     let price = mul(effective_floor, U256::from(take_bps)) / U256::from(BPS_DENOMINATOR);

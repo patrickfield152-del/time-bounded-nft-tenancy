@@ -1,22 +1,23 @@
 /**
- * The read path — one bundle per slot, no indexer and no reader contract.
+ * The read path — one bundle per slot. No indexer and no reader contract.
  *
- * The origin deployed a separate `SlotReader` because a view inside a site can only read that site
- * and its enriched per-slot fields were expensive to compose on chain. On NEAR the equivalent is
- * `slot_bundle`: one view returns the slot, quote, owner, listing and rental, so a twelve-slot page
- * is still two round trips (one block for the clock, one wave of bundles) rather than sixty.
+ * The origin deployed a separate `SlotReader`, because a view inside a site can only read that
+ * site, and its enriched per-slot fields were expensive to compose on chain. On NEAR the
+ * equivalent is `slot_bundle`: one view returns the slot, quote, owner, listing and rental. A
+ * twelve-slot page is then two round trips (one block for the clock, one wave of bundles), not
+ * sixty.
  *
- * **The buy guard is computed from the same bundle.** `encumbranceHash` hashes the records the
- * bundle returned, using the contract's byte layout, so the value passed to `buy` cannot describe a
- * different read than the price the buyer was shown.
+ * The buy guard comes from the same bundle. `encumbranceHash` hashes the records that the bundle
+ * returned, with the contract's byte layout. The value passed to `buy` therefore cannot describe a
+ * different read than the price the buyer saw.
  *
- * **Tenancy liveness is computed here, not asked for.** `rental_of` carries the term the contract
- * stores; whether it is live is `now < expiry`, and `now` is the CHAIN's clock. The same read gives
- * the unaccrued remainder a buyer would inherit, through the parity-tested `accruedOf` twin rather
- * than a second implementation of the accrual formula.
+ * Tenancy liveness is computed here, not asked for. `rental_of` carries the term that the contract
+ * stores. Whether it is live is `now < expiry`, and `now` is the CHAIN's clock. The same read gives
+ * the unaccrued remainder that a buyer would inherit, through the parity-tested `accruedOf` twin,
+ * not a second accrual formula.
  *
- * **Timestamps are nanoseconds at the contract boundary.** `Slot` and `Rental` keep ns; the pure
- * math in `./rentals` stays in seconds, so the conversion happens exactly once, here.
+ * Timestamps are nanoseconds at the contract boundary. `Slot` and `Rental` keep ns; the pure math
+ * in `./rentals` stays in seconds, so the conversion happens once, here.
  */
 import { sha256Hex } from './content';
 import { slotKey } from './keys';
@@ -24,8 +25,9 @@ import { readClock, readView, type AccountId, type QueryBlock, type Reader } fro
 import type { SiteEconomics } from './pricing';
 import { accruedOf } from './rentals';
 import { fromU128, type U128 } from './settlement';
+import { nsToSeconds, wireU64 as u64 } from './wire';
 
-const NS_PER_SECOND = 1_000_000_000n;
+
 
 /** One slot as a page should render it. */
 export interface SlotState {
@@ -207,13 +209,6 @@ export interface SiteTerms {
   royaltyBps: bigint;
 }
 
-function u64(value: number | string): bigint {
-  return typeof value === 'number' ? BigInt(Math.trunc(value)) : BigInt(value);
-}
-
-function nsToSeconds(value: bigint): bigint {
-  return value / NS_PER_SECOND;
-}
 
 const U128_MAX = (1n << 128n) - 1n;
 const U64_MAX = (1n << 64n) - 1n;
@@ -493,12 +488,12 @@ export function isTokenSettled(terms: Pick<SiteTerms, 'settlementFt'>): boolean 
 /**
  * The `expected_terms` argument every buy needs.
  *
- * **Always read this in its own step and pass it in.** Never compute it inline in an argument list:
- * it has to reflect the state the buyer was actually shown, and a fresh read at submit time would
- * defeat the guard it exists to be by picking up the very change it should be rejecting.
+ * Always read it in its own step, and pass it in. Do not compute it inline in an argument list. It
+ * has to show the state the buyer saw. A fresh read at submit time would defeat the guard, because
+ * it would pick up the change that the guard must reject.
  *
- * It commits to the TENANCY as well as the floor and registration — the rental tuple is what a
- * buyer inherits, so a term opened between quote and submit invalidates the deal they were shown.
+ * It commits to the TENANCY as well as the floor and registration. The rental tuple is what a
+ * buyer inherits, so a term opened between quote and submit invalidates the deal they saw.
  */
 export async function readEncumbrance(
   reader: Reader,
@@ -511,16 +506,16 @@ export async function readEncumbrance(
 /**
  * Everything a buy needs, read against one block.
  *
- * Three bugs this exists to prevent, all of which look like the chain misbehaving:
+ * Three bugs that this exists to prevent all look like the chain misbehaving:
  *
- * 1. **A torn read.** A quote from block N against terms from N+1 means the buyer signs a state
- *    that never existed. Every view here is pinned to the clock's own block.
- * 2. **Wall-clock deadlines.** `buy` compares `deadline_ns` against `block_timestamp()`. A user
- *    whose clock is ten minutes slow gets a rejected purchase with nothing in the UI able to
- *    explain why, so `nowNs` is the chain's clock and `buildBuyFrom` uses it.
- * 3. **An encumbered position reading as unbuyable.** `unaccruedRent` and `netCost` come back on
- *    the same read, so the confirm dialog can say "you pay X, you inherit Y, net Z" from numbers
- *    that all describe one block.
+ * 1. A torn read. A quote from block N against terms from N+1 makes the buyer sign a state that
+ *    never existed. Every view here is pinned to the clock's own block.
+ * 2. Wall-clock deadlines. `buy` compares `deadline_ns` against `block_timestamp()`. A user whose
+ *    clock is ten minutes slow gets a rejected purchase, and the UI cannot explain why. `nowNs` is
+ *    the chain's clock, and `buildBuyFrom` uses it.
+ * 3. An encumbered position that reads as unbuyable. `unaccruedRent` and `netCost` come back on the
+ *    same read, so the confirm dialog can say "you pay X, you inherit Y, net Z" from numbers that
+ *    all describe one block.
  */
 export interface BuyContext {
   slot: SlotState;

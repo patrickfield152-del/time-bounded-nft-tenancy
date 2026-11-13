@@ -1,31 +1,34 @@
 /**
- * Time-bounded tenancy: the session key a tenant uses to write content without a wallet prompt.
+ * Time-bounded tenancy: the session key that a tenant uses to write content without a wallet
+ * prompt.
  *
  * The mechanism, end to end:
  *
- *   1. A tenant calls `rent(token_id, duration_secs, expected_rate_per_day)` and pays for the term.
- *   2. They generate a fresh key pair HERE and add it to their own account as a **function-call
- *      key** restricted to `receiver_id = the site` and `method_names = ["edit"]`, funded with a
+ *   1. The tenant calls `rent(token_id, duration_secs, expected_rate_per_day)` and pays for the
+ *      term.
+ *   2. They generate a fresh key pair HERE, and add it to their own account as a function-call key.
+ *      The key allows only `receiver_id = the site` and `method_names = ["edit"]`, funded with a
  *      gas-only allowance.
  *   3. Every `edit` in the term is signed by that key: no extension, no prompt, no wallet in the
- *      loop. The site still checks `predecessor == tenant` and
- *      `block_timestamp() < tenant_expires` on every call, because the key cannot enforce either.
+ *      loop. The site still checks `predecessor == tenant` and `block_timestamp() <
+ *      tenant_expires` on every call, because the key cannot enforce either.
  *   4. At `end_rental` — or whenever the tenant wants out — the key is deleted.
  *
- * **A function-call key has no expiry field.** It has a receiver, a method list and an allowance,
- * and none of them is time. The term is enforced by the contract; that is the only authority, and
- * it is also why NEP-366 meta-transactions are safe here — a relayer does not check the allowance,
- * so a design that relied on the key running dry would be relying on billing rather than on time.
+ * A function-call key has no expiry field. It has a receiver, a method list and an allowance, and
+ * none of them is time. The contract enforces the term; it is the only authority. This is also why
+ * NEP-366 meta-transactions are safe here: a relayer does not check the allowance, so a design that
+ * relied on the key running dry would rely on billing, not on time.
  *
- * **0.25 NEAR is the allowance**, matching the default wallet sign-in grants and sized for a term
- * of ordinary editing. An allowance is a gas budget, not a balance the tenant loses: unused yocto
- * returns to the account when the key is deleted. When it runs out the key stops working — it does
- * not fail a call an owner-key would have allowed, because `edit` is the only method it may call.
+ * The allowance is 0.25 NEAR, the default that a wallet sign-in grants, sized for a term of
+ * ordinary editing. An allowance is a gas budget, not a balance that the tenant loses. Unused
+ * yocto returns to the account when the key is deleted. When it runs out, the key stops working —
+ * it does not fail a call that an owner key would allow, because `edit` is the only method it may
+ * call.
  *
- * **Deletion costs a transaction**, signed by a full-access key (the wallet), and it cannot attach
- * a deposit — which is also why `edit` itself must be non-payable. A tenant who never deletes the
- * key has not granted anyone else anything: the key is in their own account and the site's term
- * check has already expired.
+ * Deletion costs one transaction, signed by a full-access key (the wallet), and it cannot attach a
+ * deposit — which is also why `edit` itself must be non-payable. A tenant who never deletes the key
+ * has not granted anyone anything: the key sits in their own account, and the site's term check has
+ * already expired.
  */
 import { Account, KeyPair } from 'near-api-js';
 import type { AccountId } from './near';

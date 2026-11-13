@@ -18,6 +18,7 @@ import { slotKey } from './keys';
 import { readView, type AccountId, type CallRequest, type Reader } from './near';
 import { fromU128, toU128, type Amount, type U128 } from './settlement';
 import type { SlotRecord } from './reads';
+import { jsonU64 } from './wire';
 
 /** The one-yocto guard `nft_approve` asserts. It is not a storage charge and is not refunded. */
 const ONE_YOCTO = '1';
@@ -71,7 +72,7 @@ export function buildRelease(options: { vault: AccountId; depositId: bigint | nu
   return {
     contractId: options.vault,
     methodName: 'release',
-    args: { deposit_id: Number(id) },
+    args: { deposit_id: jsonU64(id, 'deposit_id') },
     deposit: NO_DEPOSIT,
   };
 }

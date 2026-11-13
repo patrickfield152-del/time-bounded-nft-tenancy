@@ -432,6 +432,11 @@ export function ipfsGatewayUrl(cid: string, gateway: string): string {
 // ---------------------------------------------------------------------------
 
 function base64Encode(bytes: Uint8Array): string {
+  // Native TC39 method first (Node 25+, V8 13.6); `Buffer` is the Node fallback;
+  // `btoa` is the browser path. All three produce standard base64 with padding.
+  if (typeof (Uint8Array.prototype as Uint8Array & { toBase64?: () => string }).toBase64 === 'function') {
+    return (bytes as Uint8Array & { toBase64(): string }).toBase64();
+  }
   // `as` is unavoidable: `Buffer` is a Node global absent from the DOM lib.
   const BufferCtor = (
     globalThis as unknown as {

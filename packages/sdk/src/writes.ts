@@ -1,30 +1,30 @@
 /**
  * Transaction builders — the write half of the SDK.
  *
- * Every function here returns a `CallRequest` rather than sending anything. The SDK never owns a
- * wallet, never picks a nonce and never decides when to submit; that belongs to the app or to a
- * script. `submit` from `./near` is the script path, `toWalletCall` the browser one.
+ * Every function here returns a `CallRequest`. It does not send. The SDK does not own a wallet,
+ * does not pick a nonce, and does not decide when to submit. The app or the script does that.
+ * `submit` from `./near` is the script path. `toWalletCall` is the browser path.
  *
- * **Two things these builders refuse to guess.**
+ * These builders do not guess two values.
  *
- * `expectedTerms` is required on every buy, with no bypass sentinel, because it has to reflect the
- * state the buyer was actually shown. A builder that read it fresh at submit time would defeat the
- * guard it exists to be — it would pick up the very change it should be rejecting. Read it with
- * `readBuyContext` (or `readEncumbrance`) in its own step and pass it in.
+ * `expectedTerms`: required on every buy. No bypass value exists. It has to show the state the
+ * buyer saw. A builder that read it again at submit time would defeat the guard, because it would
+ * pick up the change that the guard must reject. Read it with `readBuyContext` (or
+ * `readEncumbrance`) in its own step, and pass it in.
  *
- * `settlementFt` is required on every builder that moves money, because the two settlement paths
- * are not interchangeable. A native-shaped call against a token site reverts having sent nothing; a
- * token-shaped call against a native site is a transfer to an account that is not a token. Pass
- * `readSiteTerms().settlementFt` through — there is no default, because a default would silently be
- * right for one kind of site and wrong for the other.
+ * `settlementFt`: required on every builder that moves money. The two settlement paths are not
+ * interchangeable. A native call to a token site reverts and sends nothing. A token call to a
+ * native site is a transfer to an account that is not a token. Pass `readSiteTerms().settlementFt`
+ * through. There is no default, because a default is wrong for one kind of site.
  *
- * **The token path is `ft_transfer_call`, not an approval.** NEP-141 has no allowance to set: the
- * buyer calls the token once with the cost as the amount and a JSON `msg`, and the site's
- * `ft_on_transfer` dispatches on `action`. The site sees `sender_id` as the payer, which is why
- * `buy_for` exists only on the native path — the FT message carries no recipient field, and
- * inventing one would be a message the contract does not read.
+ * The token path is `ft_transfer_call`, not an approval. NEP-141 has no allowance to set. The
+ * buyer calls the token once, with the cost as the amount and a JSON `msg`. The site's
+ * `ft_on_transfer` dispatches on `action`. The site sees `sender_id` as the payer. This is why
+ * `buy_for` exists only on the native path: the FT message has no recipient field, and an invented
+ * one would be a message the contract does not read.
  */
 import { assertContentHash } from './content';
+import { jsonU64, NS_PER_SECOND } from './wire';
 import { slotKey, slotKeys } from './keys';
 import { type AccountId, type CallRequest } from './near';
 import { toU128, type Amount, type U128 } from './settlement';
@@ -52,8 +52,33 @@ const ONE_YOCTO = '1';
 /** Non-payable methods. Sending anything here reverts the call. */
 const NO_DEPOSIT = '0';
 
-const NS_PER_SECOND = 1_000_000_000n;
-const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A `u64` field of a call: an integer that stays exact as a JSON number.
+ * The shared helper (`jsonU64`) throws the same `RangeError` shape; this
+ * wrapper keeps the non-negative and integer-only checks writes insists on.
+ */
+function toU64(value: bigint | number, field: string): number {
+  if (typeof value === 'number' && !Number.isInteger(value)) {
+    throw new RangeError(`stele/writes: ${field} must be an integer, got ${value}`);
+  }
+  const exact = jsonU64(value, field);
+  if (exact < 0) throw new RangeError(`stele/writes: ${field} must be non-negative`);
+  return exact;
+}
+
+/**
+ * A nanosecond timestamp as the JSON number `deadline_ns` expects.
+ *
+ * Current epoch nanoseconds exceed `Number.MAX_SAFE_INTEGER`, so the value carries up to ~256 ns of
+ * double rounding. That is stated rather than hidden: a deadline is compared against a block
+ * timestamp and is minutes away, so 256 ns is eight orders of magnitude below anything that could
+ * change the outcome.
+ */
+function nsToJson(value: bigint): number {
+  if (value < 0n) throw new RangeError('stele/writes: a deadline cannot be negative');
+  return Number(value);
+}
 
 /** Thrown when a builder would produce a call the chosen settlement path cannot express. */
 export class UnsupportedSettlementError extends Error {
@@ -71,29 +96,6 @@ export class InvalidEconomicsError extends Error {
   }
 }
 
-/** A `u64` field of a call: an integer that stays exact as a JSON number. */
-function toU64(value: bigint | number, field: string): number {
-  const asBig = typeof value === 'bigint' ? value : BigInt(Math.trunc(value));
-  if (typeof value === 'number' && !Number.isInteger(value)) {
-    throw new RangeError(`stele/writes: ${field} must be an integer, got ${value}`);
-  }
-  if (asBig < 0n) throw new RangeError(`stele/writes: ${field} must be non-negative`);
-  if (asBig > MAX_SAFE) throw new RangeError(`stele/writes: ${field} ${asBig} does not fit a JSON number`);
-  return Number(asBig);
-}
-
-/**
- * A nanosecond timestamp as the JSON number `deadline_ns` expects.
- *
- * Current epoch nanoseconds exceed `Number.MAX_SAFE_INTEGER`, so the value carries up to ~256 ns of
- * double rounding. That is stated rather than hidden: a deadline is compared against a block
- * timestamp and is minutes away, so 256 ns is eight orders of magnitude below anything that could
- * change the outcome.
- */
-function nsToJson(value: bigint): number {
-  if (value < 0n) throw new RangeError('stele/writes: a deadline cannot be negative');
-  return Number(value);
-}
 
 function bpsOf(amount: bigint, bps: bigint): bigint {
   return (amount * bps) / 10_000n;
@@ -595,14 +597,13 @@ const SEVEN_DAYS = 604_800n;
 const ONE_YEAR = 31_536_000n;
 
 /**
- * The clamps below are duplicated from the contract on purpose, and this is the one place in the
- * SDK where duplicating a contract rule is right: the contract's version is the authority and
- * reverts, but a revert here costs a deploy transaction and produces an error name rather than a
- * sentence.
+ * The clamps below duplicate the contract on purpose. This is the one place in the SDK where
+ * duplicating a contract rule is right. The contract's version is the authority, and it reverts.
+ * But a revert here costs a deploy transaction and returns an error name, not a sentence.
  *
- * The protocol legs are NOT checked: they are the factory's state, supplied by its own `new`, and
- * a client that invented them would be validating against numbers the deployment never agreed to.
- * `take_bps > payout_bps + protocol_bps` is therefore enforced where it can be — on chain.
+ * The protocol legs are NOT checked. They are the factory's state, supplied by its own `new`. A
+ * client that invented them would validate against numbers that the deployment never agreed to.
+ * `take_bps > payout_bps + protocol_bps` is therefore enforced where it can be: on chain.
  */
 function assertSiteConfig(options: SiteConfigOptions): void {
   const { economics, rentals, floorPolicy } = options;
@@ -629,8 +630,8 @@ function assertSiteConfig(options: SiteConfigOptions): void {
 }
 
 /**
- * The `SiteConfig` struct and the slots' keys and floors, checked against the contract's clamps —
- * the one implementation behind `buildCreateSite`.
+ * The `SiteConfig` struct, the slots' keys and the floors, checked against the contract's clamps.
+ * This is the one implementation behind `buildCreateSite`.
  */
 export function siteConfigOf(options: SiteConfigOptions): {
   config: SiteConfigArgs;

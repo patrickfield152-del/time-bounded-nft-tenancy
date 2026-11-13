@@ -1,24 +1,25 @@
 /**
- * Slot identity — and the one decision everything else falls out of.
+ * Slot identity — and the one decision everything else follows from.
  *
  *     token_id = "hero.headline"      // the readable dotted key, stored as-is
  *
- * The origin hashed the key client-side (`uint256(keccak256(bytes(key)))`) because an EVM contract
- * only ever sees a word. NEAR stores a `String`, so the hash bought nothing and cost the one thing
- * an indexer needs: a token id a person can read. The readable key IS the token id — the documented
- * deviation from the origin, and the reason `slotKey` is now a validator rather than a hash.
+ * The origin hashed the key in the client (`uint256(keccak256(bytes(key)))`). An EVM contract only
+ * sees a word, so it had to. NEAR stores a `String`. The hash bought nothing and took from the
+ * indexer the one thing it needs: a token id a person can read. The readable key IS the token id —
+ * the documented deviation from the origin, and the reason `slotKey` is now a validator, not a
+ * hash.
  *
  * Two consequences, both intended:
  *
- *   - **A key is public.** Anyone reading the chain learns the page's structure. That structure is
- *     published in the site's own config anyway, and `registered` keeps unlisted keys unbuyable
- *     until the owner registers them.
- *   - **Enumeration is explicit.** A `LookupMap` has no range, so the site carries a
- *     `registered` vector and `registered_slots_page`; a client does not need it — a site knows its
- *     own keys from config — but indexers and marketplaces do.
+ *   - A key is public. Anyone who reads the chain learns the page's structure. The site's own
+ *     config publishes that structure anyway, and `registered` keeps unlisted keys unbuyable until
+ *     the owner registers them.
+ *   - Enumeration is explicit. A `LookupMap` has no range, so the site carries a `registered`
+ *     vector and `registered_slots_page`. A client does not need them — a site knows its own keys
+ *     from config — but indexers and marketplaces do.
  *
- * There is no reverse function and there cannot be one: a site that wants to display its keys reads
- * them from its own config.
+ * There is no reverse function, and there cannot be one. A site that wants to display its keys
+ * reads them from its own config.
  */
 
 /**

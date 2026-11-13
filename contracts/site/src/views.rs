@@ -99,8 +99,8 @@ impl Contract {
         U128(pricing::to_u128(base, "reversion base"))
     }
 
-    /// Origin `ownerOfOrZero`, expressed as an `Option` because NEAR has no
-    /// zero account to return. `None` = never minted.
+    /// Origin `ownerOfOrZero`, as an `Option`, because NEAR has no zero
+    /// account to return. `None` = never minted.
     pub fn owner_of_or_zero(&self, token_id: TokenId) -> Option<AccountId> {
         self.token_owner(&token_id)
     }
@@ -114,7 +114,7 @@ impl Contract {
         u64::from(self.registered.len())
     }
 
-    /// Origin `registeredSlotsPage`: clamped to the vector, empty past the end.
+    /// Origin `registeredSlotsPage`: clamped to the vector. Empty past the end.
     pub fn registered_slots_page(&self, start: u64, count: u64) -> Vec<TokenId> {
         let length = u64::from(self.registered.len());
         if start >= length {

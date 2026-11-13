@@ -1,21 +1,20 @@
 /**
  * What a site's money is, and how a money value crosses the wire.
  *
- * **Every amount on the wire is a decimal string.** `u128` in JSON is either a string type
- * (`U128`) or a number, and near-sdk's `U128` is the string form for the reason that matters
- * here: 10^24 yocto per NEAR puts ordinary amounts past `Number.MAX_SAFE_INTEGER`, so a value
- * routed through a JavaScript number is silently rounded. `toU128`/`fromU128` are the only
- * conversions, and they are strict — a negative, fractional or out-of-range value throws instead
- * of becoming a plausible-looking wrong number.
+ * Every amount on the wire is a decimal string. `u128` in JSON is a string type (`U128`) or a
+ * number. near-sdk's `U128` is the string form, for this reason: 10^24 yocto per NEAR puts normal
+ * amounts past `Number.MAX_SAFE_INTEGER`, and a JavaScript number rounds them in silence.
+ * `toU128`/`fromU128` are the only conversions. They are strict: a negative, a fraction, or an
+ * out-of-range value throws. It does not become a plausible wrong number.
  *
- * **Native NEAR has 24 decimals.** A floor written for a 6-decimal mock FT means something
- * different by 18 orders of magnitude, so nothing here guesses: `readSettlementAsset` reads
- * `ft_metadata` for a token site and returns the fixed native description otherwise, and callers
- * format with the decimals they got back.
+ * Native NEAR has 24 decimals. A floor written for a 6-decimal mock FT means something different
+ * by 18 orders of magnitude. Nothing here guesses: `readSettlementAsset` reads `ft_metadata` for a
+ * token site and returns the fixed native description otherwise. Callers format with the decimals
+ * they got back.
  *
  * There is no chain list and no deployed-token table. The settlement account comes from the site's
- * own `terms()` read or from `NEAR_FT_ACCOUNT`, so a testnet deployment and a local sandbox are
- * the same code path.
+ * own `terms()` read or from `NEAR_FT_ACCOUNT`. A testnet deployment and a local sandbox are the
+ * same code path.
  */
 import { readView, type AccountId, type Reader } from './near';
 import { nearToYocto } from 'near-api-js';
