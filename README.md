@@ -1,7 +1,8 @@
 # stele
 
-**NEP-171 slot NFTs + time-bounded function-call-key tenancy, NEP-141 settlement.** Tracks: `nfts`, `realworld`. Licence: MIT. Baseline: tag `pre-hackathon` marks the imported tree at `30779ef` (upstream `vibecodermaxi/websitekit`).
+**Tracks:** `nfts`, `realworld` · **Licence:** MIT · **NEP:** NEP-171 / NEP-141 · **Baseline:** tag `pre-hackathon` marks the imported tree at `30779ef` (upstream `vibecodermaxi/websitekit`), diff `git diff pre-hackathon..hackathon-submission` · **Q-015 sibling:** **skjold** (agent identity and credentials, tracks `security`, `agents`).
 
+Slot NFTs that do something: each NEP-171 token is a site slot with a price curve and a pull-payment ledger. Buys are guarded by deadline, terms, cooldown and slippage; terms only tighten; sellers withdraw from escrow credit. Tenancy expiry is descoped.
 
 ```mermaid
 sequenceDiagram
@@ -56,83 +57,26 @@ sequenceDiagram
     T-->>-D: SlotBought and TermsLocked events
 ```
 
-## Quickstart
 ```bash
-# 1. contracts (rustc 1.100.0, pinned by rust-toolchain.toml)
 cargo check --workspace --target wasm32-unknown-unknown
-cargo test -p stele-site --tests            # 38 tests
-# 2. wasm artifacts
+cargo test -p stele-site --tests
 for c in site factory escrow mock-ft; do (cd contracts/$c && cargo near build non-reproducible-wasm); done
-# 3. client (pnpm 12.18.0, Node >= 26.13.1)
 pnpm install
 pnpm -C packages/sdk typecheck && pnpm -C packages/react typecheck
 pnpm -C packages/sdk build && pnpm -C packages/react build
 pnpm exec vitest run packages/sdk/src
-# 4. zero-funds dry-run (Linux/macOS; WSL2 on Windows)
-STELE_SKIP_ESCROW=1 STELE_SKIP_EXPIRY=1 \
-STELE_SITE_WASM=$PWD/target/near/stele_site/stele_site.wasm \
-STELE_FACTORY_WASM=$PWD/target/near/stele_factory/stele_factory.wasm \
-STELE_ESCROW_WASM=$PWD/target/near/stele_escrow/stele_escrow.wasm \
-STELE_MOCK_FT_WASM=$PWD/target/near/stele_mock_ft/stele_mock_ft.wasm \
-node scripts/sandbox-dry-run.mjs
+STELE_SKIP_ESCROW=1 STELE_SKIP_EXPIRY=1 node scripts/sandbox-dry-run.mjs
 ```
 
-## Numbers
+| Do this | See this | Proves |
+|---|---|---|
+| run the quickstart block above | clean builds | quickstart |
+| `cargo test -p stele-site --tests` | 38 tests pass | tests |
+| `pnpm exec vitest run packages/sdk/src` | 15 tests pass | SDK tested |
+| `vectors/manifest.json` | 3,714 vector executions | price curve parity |
+| buy guards (`plan_buy`) | DeadlineExpired/TermsChanged/CooldownActive/SlippageExceeded | guards are tested |
+| `node scripts/sandbox-dry-run.mjs` | `DRY-RUN OK` | smoke/measure |
+| `git diff pre-hackathon..hackathon-submission`; `git rev-parse --short hackathon-submission` | tag `pre-hackathon` at `30779ef` | baseline |
+| descoped dry-run | escrowed-site creation and timestamp-based expiry are descoped | Limits: `create_escrowed_site` fails at i=3 with `Exceeded the prepaid gas` (12.808 TGas); royalties are display-only |
 
-- Rust: parity 10 tests, terms/ratchet 26, view/encumbrance 2, 0 failed (`cargo test -p stele-site --test parity`, `cargo test -p stele-site --test terms`, `cargo test -p stele-site --test views`).
-- SDK: 15 tests, 0 failed in `packages/sdk/src/stele.test.ts`.
-
-### Repro steps
-1. Typecheck the SDK: do `pnpm -C packages/sdk typecheck` → see exit code 0, no output.
-2. Run the SDK suite: do `pnpm exec vitest run packages/sdk/src` → see `Tests  15 passed (15)`.
-3. Run the Rust parity/terms/views suites: do `cargo test -p stele-site --test parity && cargo test -p stele-site --test terms && cargo test -p stele-site --test views` → see 10 + 26 + 2 test results, `0 failed`.
-4. Wasm-free dry run (zero funds, sandbox): do `STELE_SKIP_ESCROW=1 STELE_SKIP_EXPIRY=1 node scripts/sandbox-dry-run.mjs` (with the four wasm paths set after step 2 of Quickstart) → see `DRY-RUN OK`.
-
-## Claim → evidence
-
-| Claim | Evidence |
-|---|---|
-| Slots are NEP-171 tokens | `contracts/site/src/lib.rs` NEP-171 impl; `vectors/encumbrance-vectors.jsonl` parity rows |
-| Buy is guarded by deadline/terms/cooldown/slippage | `contracts/site/src/lib.rs:974` `plan_buy` panics `DeadlineExpired`, `TermsChanged`, `CooldownActive`, `SlippageExceeded` |
-| Price curve matches the vector grid | `contracts/site/tests/parity.rs:155` `price_and_effective_floor_match_every_computable_row`, `parity.rs:448` `ask_rows_match_the_reversion_base_ceiling_and_quote` |
-| Payout goes through a pull ledger | `contracts/escrow/src/lib.rs:366` `release` → `credit` (`lib.rs:969`) → `advance_head` |
-| Terms ratchet tighten-only | `contracts/site/tests/terms.rs:515` `floor_policy_ratchets_tighten_only` |
-| 15 SDK tests, 0 failed | `pnpm exec vitest run packages/sdk/src` → `Tests  15 passed (15)` |
-| 3,714 vector executions | `vectors/manifest.json` sha256 per file; 3,024 price rows + 690 v2 rows |
-
-
-| Artifact | Bytes (measured build) |
-|---|---|
-| site | 428,124 |
-| factory | 183,047 |
-| escrow | 179,537 |
-| mock-ft | 125,535 |
-
-Sizes from one local `cargo near build non-reproducible-wasm` run; rebuild with step 2 of Quickstart to reproduce them (non-reproducible builds vary slightly between machines).
-
-## Layout
-
-## Toolchain pins
-- Rust 1.100.0, edition 2024 (`rust-toolchain.toml`); Node >= 26.13.1 (`.nvmrc`), pnpm 12.18.0, cargo-near 0.23.0, wasm-opt 0.116.1.
-
-
-## Limits
-- Escrowed-site creation and timestamp-based expiry are descoped. `create_escrowed_site` fails in its vault/site XCC chain at receipt `i=3` with `Exceeded the prepaid gas` (12.808 TGas). The `+0.89 TGas` is fixed function-call and receipt-creation overhead. Attach at `allotment - 1 Tgas` instead of raising caps.
-- `sandbox_fast_forward` moves height only, so block timestamps do not move. The post-expiry edit and `end_rental`/hash-restore assertions are unreachable in the harness. Patch `Rental.expiry`/`BlockInfo` instead of advancing height. The descoped dry-run (`STELE_SKIP_ESCROW=1 STELE_SKIP_EXPIRY=1`) ends `DRY-RUN OK`.
-- The factory supplies the site's `min_slot_floor` from the settlement asset's real decimals. Native 24 gives 1e20, and a 6-decimal mock FT gives 100. `new` never derives the floor from `ft_metadata`, because that call is asynchronous.
-- Royalty info is display-only. `buy` never deducts it.
-
-## Baseline and disclosure
-
-Baseline: tag `pre-hackathon` marks the imported tree at `30779ef`. The upstream project is `vibecodermaxi/websitekit`.
-Submission: tag `hackathon-submission` marks the submitted state. `git rev-parse --short hackathon-submission` prints it.
-Diff: `git diff pre-hackathon..hackathon-submission`. After publishing, https://github.com/<owner>/<repo>/compare/pre-hackathon...hackathon-submission.
-Libraries, templates and AI-generated code are listed in `ATTRIBUTION.md`.
-
-## Origin, license, hackathon
-
-Port of an MIT-licensed EVM product; provenance and archive hash in `ORIGIN.md`, upstream notice in `ATTRIBUTION.md`. The MIT license is kept.
-
-Tracks: `nfts`, `realworld`. Each slot is a NEP-171 token that carries tenancy rights, so the asset does something. Submission checklist, payload fields, and deadline: `SUBMISSION-PREP.md`.
-
-Q-015 (second project on this email): **skjold** (agent identity and credentials, tracks `security`, `agents`).
+Links: [ATTRIBUTION](ATTRIBUTION.md) · [LICENSE](LICENSE).
