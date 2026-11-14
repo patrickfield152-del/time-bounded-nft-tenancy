@@ -7,6 +7,8 @@ A publisher divides a page into named slots. Each slot is a NEP-171 token. The h
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontSize":"14px"}}}%%
 sequenceDiagram
+    accTitle: stele runtime flow
+    accDescr: Seven phases from code deploy to slot mint: escrow bind, vault funding, guarded buy, split payout.
     autonumber
     participant D as Demo
     participant S as SDK
@@ -14,15 +16,15 @@ sequenceDiagram
     participant T as Site
     participant E as Escrow
     participant M as MockFT
-    rect rgb(226,238,255)
-    Note over D,F: PHASE 1 — Deploy: factory stores code and escrow params once
+    rect rgba(226,238,255,0.20)
+    Note over D,F: PHASE 1 — Deploy code and params once
     D->>F: store_site_code(code)
     D->>F: store_escrow_code(code)
     D->>F: set_escrow_params(params) and allow_token(token, decimals)
     F-->>D: SiteCodeNotStored released
     end
-    rect rgb(230,247,235)
-    Note over D,T: PHASE 2 — Create site account: vault and site deployed as factory children
+    rect rgba(230,247,235,0.20)
+    Note over D,T: PHASE 2 — Create site and vault
     D->>S: buildCreateSite(options)
     S->>F: create_escrowed_site(vault, site, config)
     F->>F: must_be_child and floor_for checks
@@ -33,8 +35,8 @@ sequenceDiagram
     end
     F-->>D: SiteCreated event
     end
-    rect rgb(255,244,214)
-    Note over F,E: PHASE 3 — Bind escrow: pinned treasury and params committed before booking
+    rect rgba(255,244,214,0.20)
+    Note over F,E: PHASE 3 — Bind escrow to treasury
     F->>T: storage_deposit(vault_id)
     F->>E: bind(site, escrow_params)
     E->>T: terms()
@@ -43,23 +45,23 @@ sequenceDiagram
     E->>E: bind_owner_callback caches publisher, book_inner
     F-->>F: escrowed_bind_callback records vault_of, refunds change
     end
-    rect rgb(243,232,255)
-    Note over M,E: PHASE 4 — Fund vault: only the bound settlement token may book or reserve
+    rect rgba(243,232,255,0.20)
+    Note over M,E: PHASE 4 — Fund vault via settlement token
     S->>M: ft_transfer_call(amount, msg)
     M->>E: ft_on_transfer(amount, msg)
     E->>E: push_deposit or reserve, other msg refunds
     D->>E: release(deposit_id) after is_mature
     E->>E: credit(beneficiary) then advance_head
     end
-    rect rgb(255,232,232)
-    Note over D,T: PHASE 5 — Buy with terms guard: hash, cooldown and deadline gate every buy
+    rect rgba(255,232,232,0.20)
+    Note over D,T: PHASE 5 — Buy with terms guard
     D->>S: Promise.all readSettlementAsset, readSlots, readSiteTerms
     D->>S: buildBuy(options)
     S->>T: buy(token_id, max_price, expected_terms, deadline_ns)
     T->>T: plan_buy DeadlineExpired, TermsChanged, CooldownActive, SlippageExceeded
     end
-    rect rgb(224,247,250)
-    Note over T,M: PHASE 6 — Settle split payout: credits book before ownership moves
+    rect rgba(224,247,250,0.20)
+    Note over T,M: PHASE 6 — Settle split payout
     alt native deposit
     T->>T: storage_top_up then storage_deposit
     T-->>T: settle_buy_callback
@@ -68,8 +70,8 @@ sequenceDiagram
     end
     T->>T: execute_buy settle_rent then credit payout, protocol_cut and site_cut
     end
-    rect rgb(255,248,225)
-    Note over D,T: PHASE 7 — NFT slot and events: first claim mints, every sale emits
+    rect rgba(255,248,225,0.20)
+    Note over D,T: PHASE 7 — Mint slot and emit events
     T->>T: mint_with_metadata or external_transfer, listing cleared
     T-->>D: SlotBought and TermsLocked events
     end
