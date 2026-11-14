@@ -116,3 +116,7 @@ pnpm 12.18.0 · cargo-near 0.23.0 · wasm-opt 0.116.1.
 Port of an MIT-licensed EVM product; provenance, baseline commit and archive hash are in
 `ORIGIN.md`, and the upstream notice is reproduced in `ATTRIBUTION.md`. MIT license kept. There is no
 git remote; publishing is a human action.
+
+## Hackathon
+
+Track: `nfts`. Development ends 2026-11-14T23:59:00Z (UTC).
