@@ -9,37 +9,43 @@ sequenceDiagram
     accTitle: stele runtime flow
     accDescr: Seven phases from code deploy to slot mint: escrow bind, vault funding, guarded buy, split payout.
     autonumber
+    box rgba(255,244,214,0.12) Off-chain client
     participant D as Demo
     participant S as SDK
+    end
+    box rgba(230,247,235,0.12) NEAR on-chain
     participant F as Factory
     participant T as Site
     participant E as Escrow
+    end
+    box rgba(243,232,255,0.12) Settlement token
     participant M as MockFT
+    end
     rect rgba(226,238,255,0.20)
     Note over D,F: PHASE 1 — Deploy code and params once
-    D->>F: store_site_code(code)
+    D->>+F: store_site_code(code)
     D->>F: store_escrow_code(code)
     D->>F: set_escrow_params(params) and allow_token(token, decimals)
-    F-->>D: SiteCodeNotStored released
+    F-->>-D: SiteCodeNotStored released
     end
     rect rgba(230,247,235,0.20)
     Note over D,T: PHASE 2 — Create site and vault
     D->>S: buildCreateSite(options)
-    S->>F: create_escrowed_site(vault, site, config)
+    S->>+F: create_escrowed_site(vault, site, config)
     F->>F: must_be_child and floor_for checks
     F->>E: create_account then new(factory)
     F->>T: create_account then new(owner, treasury, config)
     alt direct site
     S->>F: create_site(payload)
     end
-    F-->>D: SiteCreated event
+    F-->>-D: SiteCreated event
     end
     rect rgba(255,244,214,0.20)
     Note over F,E: PHASE 3 — Bind escrow to treasury
     F->>T: storage_deposit(vault_id)
-    F->>E: bind(site, escrow_params)
+    F->>+E: bind(site, escrow_params)
     E->>T: terms()
-    E-->>F: bind_callback(terms)
+    E-->>-F: bind_callback(terms)
     E->>T: own_get_owner()
     E->>E: bind_owner_callback caches publisher, book_inner
     F-->>F: escrowed_bind_callback records vault_of, refunds change
@@ -56,14 +62,14 @@ sequenceDiagram
     Note over D,T: PHASE 5 — Buy with terms guard
     D->>S: Promise.all readSettlementAsset, readSlots, readSiteTerms
     D->>S: buildBuy(options)
-    S->>T: buy(token_id, max_price, expected_terms, deadline_ns)
+    S->>+T: buy(token_id, max_price, expected_terms, deadline_ns)
     T->>T: plan_buy DeadlineExpired, TermsChanged, CooldownActive, SlippageExceeded
     end
     rect rgba(224,247,250,0.20)
     Note over T,M: PHASE 6 — Settle split payout
     alt native deposit
-    T->>T: storage_top_up then storage_deposit
-    T-->>T: settle_buy_callback
+    T->>+T: storage_top_up then storage_deposit
+    T-->>-T: settle_buy_callback
     else settlement token
     M->>T: ft_on_transfer dispatch, price never exceeds max_price
     end
@@ -72,7 +78,7 @@ sequenceDiagram
     rect rgba(255,248,225,0.20)
     Note over D,T: PHASE 7 — Mint slot and emit events
     T->>T: mint_with_metadata or external_transfer, listing cleared
-    T-->>D: SlotBought and TermsLocked events
+    T-->>-D: SlotBought and TermsLocked events
     end
 ```
 
