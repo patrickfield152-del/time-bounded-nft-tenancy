@@ -111,9 +111,9 @@ Vectors: **3,024** take-price rows + **690** v2 ask/rent/fee rows, with a sha256
 - Rust: parity 10 tests, terms/ratchet 26, view/encumbrance 2, 0 failed (`cargo test -p stele-site --test parity`, `cargo test -p stele-site --test terms`, `cargo test -p stele-site --test views`).
 - SDK: 15 tests, 0 failed in `packages/sdk/src/stele.test.ts`.
 
-Totals: **3,714 parity vector executions**, 38 Rust + 15 SDK tests, **0 failed**. Gas is not a headline claim; the sandbox prints a per-receipt `gas_burnt`.
+Totals: **3,714 parity vector executions**, 38 Rust + 15 SDK tests, **0 failed**.
 
-Release wasm sizes come from `cargo near build non-reproducible-wasm`. The ABI is embedded, `opt-level = "z"`, and factory/escrow/mock-ft are `cdylib`-only:
+The ABI is embedded, `opt-level = "z"`, and factory/escrow/mock-ft are `cdylib`-only:
 
 | Artifact | Bytes |
 |---|---|
@@ -151,3 +151,5 @@ Libraries, templates and AI-generated code are listed in `ATTRIBUTION.md`.
 Port of an MIT-licensed EVM product. Provenance, baseline commit, and archive hash are in `ORIGIN.md`; the upstream notice is reproduced in `ATTRIBUTION.md`. The MIT license is kept.
 
 Tracks: `nfts`, `realworld`. Each slot is a NEP-171 token that carries tenancy rights, so the asset does something. Submission checklist, payload fields, and deadline: `SUBMISSION-PREP.md`.
+
+Q-015 (second project on this email): **skjold** (agent identity and credentials, tracks `security`, `agents`).
