@@ -1,19 +1,48 @@
-/target*/
+# Build output
+target/
 node_modules/
-.env
-.env.local
 dist/
 .next/
 out/
+*.tsbuildinfo
+*.wasm
 cache/
 broadcast/
-*.tsbuildinfo
-.DS_Store
+
+# Secrets and local env
+.env
+.env.local
 .near-credentials/
-*.wasm
-wave*.log
-wave*.exit
+
+# Markdown and doc temporaries
+*.md.bak
+*.md.tmp
+*.md.orig
+.~*
+
+# Test and runtime output
+*.log
+*.out
+*.err
+coverage/
+.coverage
+.pytest_cache/
+htmlcov/
+bench.json
+evidence/*.log
+
+# Tool caches
+.cache/
+.turbo/
+.parcel-cache/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+
+# Local tooling
+.DS_Store
 .claude/
 apps/demo/next-env.d.ts
+
 # Resolved on the build box; the pinned direct versions are the contract.
 Cargo.lock

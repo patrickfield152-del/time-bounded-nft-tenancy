@@ -75,11 +75,6 @@ sequenceDiagram
     end
 ```
 
-## Status
-W1 REPO: scaffold, toolchain pins, state/type layouts. W2 PRIMITIVE: parity vectors, pricing/rentals/terms, site NFT core, SDK and React. Both done.
-
-W3 FLOWS: tenancy/edit/claim, factory, escrow, mock FT, sandbox harness. Done, descoped below. W4 CLOSE: README, numbers, sweep, clean-room. Done.
-
 ## Quickstart
 ```bash
 # 1. contracts (rustc 1.100.0, pinned by rust-toolchain.toml)
@@ -106,12 +101,10 @@ node scripts/sandbox-dry-run.mjs
 ## Numbers
 Vectors: **3,024** take-price rows + **690** v2 ask/rent/fee rows, with a sha256 per file in `vectors/manifest.json`.
 
-- Parity: 10 tests, 0 failed (`cargo test -p stele-site --test parity`).
-- Terms/ratchet: 26 tests, 0 failed (`cargo test -p stele-site --test terms`).
-- View/encumbrance: 2 tests, 0 failed (`cargo test -p stele-site --test views`).
-- SDK behavior, `packages/sdk/src/stele.test.ts`: 15 tests, 0 failed.
+- Rust: parity 10 tests, terms/ratchet 26, view/encumbrance 2, 0 failed (`cargo test -p stele-site --test parity`, `cargo test -p stele-site --test terms`, `cargo test -p stele-site --test views`).
+- SDK: 15 tests, 0 failed in `packages/sdk/src/stele.test.ts`.
 
-Measured claim: **3,714 parity vector executions**, 38 Rust + 15 SDK tests, **0 failed**. Gas is not a headline claim. The sandbox can print a per-receipt `gas_burnt` if a later pass needs it.
+Totals: **3,714 parity vector executions**, 38 Rust + 15 SDK tests, **0 failed**. Gas is not a headline claim; the sandbox prints a per-receipt `gas_burnt`.
 
 Release wasm sizes come from `cargo near build non-reproducible-wasm`. The ABI is embedded, `opt-level = "z"`, and factory/escrow/mock-ft are `cdylib`-only:
 
@@ -123,23 +116,13 @@ Release wasm sizes come from `cargo near build non-reproducible-wasm`. The ABI i
 | mock-ft | 125,535 |
 
 ## Layout
-```
-near-stele/
-|-- contracts/{site,factory,escrow,mock-ft}
-|-- vectors/{price-vectors.jsonl,v2-vectors.jsonl,encumbrance-vectors.jsonl,manifest.json}
-|-- packages/{sdk,react}
-|-- apps/demo
-|-- scripts/{regen-vectors-from-origin.sh,sandbox-dry-run.mjs}
-|-- tests/sandbox
-|-- rust-toolchain.toml, .nvmrc, pnpm-workspace.yaml
-```
+- `near-stele` monorepo: `contracts/{site,factory,escrow,mock-ft}`, `tests/sandbox`, `scripts/{regen-vectors-from-origin.sh,sandbox-dry-run.mjs}`, `rust-toolchain.toml`, `.nvmrc`, `pnpm-workspace.yaml`.
+- `packages/{sdk,react}`, `apps/demo`, `vectors/{price-vectors.jsonl,v2-vectors.jsonl,encumbrance-vectors.jsonl,manifest.json}`.
 
 ## Toolchain pins
-- Rust 1.100.0, edition 2024, pinned by `rust-toolchain.toml`.
+- Rust 1.100.0, edition 2024 (`rust-toolchain.toml`); Node >= 26.13.1 (`.nvmrc`), pnpm 12.18.0, cargo-near 0.23.0, wasm-opt 0.116.1.
 - near-sdk 5.30.2, near-sdk-contract-tools 4.0.0, primitive-types 0.14.0, near-api-js 7.5.3, near-sandbox 0.3.5.
-- @hot-labs/near-connect 0.12.0, near-connect-hooks 1.1.6, typescript 7.0.2, tsx 4.23.15, tsup 9.0.0.
-- vitest 5.1.0, next 16.4.6, react/react-dom 19.3.1, @types/node 26.6.6.
-- Node >= 26.13.1 (`.nvmrc`), pnpm 12.18.0, cargo-near 0.23.0, wasm-opt 0.116.1.
+- @hot-labs/near-connect 0.12.0, near-connect-hooks 1.1.6, typescript 7.0.2, tsx 4.23.15, tsup 9.0.0, vitest 5.1.0, next 16.4.6, react/react-dom 19.3.1, @types/node 26.6.6.
 
 `pnpm-workspace.yaml` holds `autoDedupe`, `dedupePeers`, and `overrides`. The overrides keep exactly one `@hot-labs/near-connect` version in the lockfile. Lockfiles: `Cargo.lock` and `pnpm-lock.yaml`. `.env.example` carries `NEAR_FACTORY_ACCOUNT`, `NEAR_SITE_ACCOUNT`, `NEAR_VAULT_ACCOUNT`, `NEAR_FT_ACCOUNT`, and `NEAR_RPC_URL`: testnet example values, no keys.
 
@@ -151,6 +134,6 @@ near-stele/
 - Royalty info is display-only. `buy` never deducts it.
 
 ## Origin, license, hackathon
-Port of an MIT-licensed EVM product. Provenance, baseline commit, and archive hash are in `ORIGIN.md`. `ATTRIBUTION.md` reproduces the upstream notice. The MIT license is kept. There is no git remote, and publishing is a human action.
+Port of an MIT-licensed EVM product. Provenance, baseline commit, and archive hash are in `ORIGIN.md`; the upstream notice is reproduced in `ATTRIBUTION.md`. The MIT license is kept.
 
-Tracks: `realworld`, `business`. Development ends 2026-11-14T23:59:00Z (UTC).
+Tracks: `realworld`, `business`. Submission checklist, payload fields, and deadline: `SUBMISSION-PREP.md`.
