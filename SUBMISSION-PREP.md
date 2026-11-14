@@ -39,7 +39,7 @@ One moment, one visible result. No screenshots-only demo (Q-012). Tags @NEARProt
 | leadName | 2-80 chars | EMPTY |
 | email | valid, <=160, max 2 submissions per address (Q-015) | EMPTY |
 | size | `1` / `2 - 4` / `4 - 6` / `6 - 8` / `8+` | EMPTY |
-| tracks | >=1 track id, each once; `realworld`, `business` fit | EMPTY |
+| tracks | >=1 track id, each once; `nfts`, `realworld` fit | EMPTY |
 | nearAddress | 2-64 lowercase mainnet account the team creates | EMPTY |
 | projectUrl | http(s), <=300, public repo, unique | EMPTY |
 | demoUrl | http(s), <=300, published X post | EMPTY |
