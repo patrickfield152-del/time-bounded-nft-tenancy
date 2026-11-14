@@ -101,12 +101,14 @@ node scripts/sandbox-dry-run.mjs
 | 3,714 vector executions | `vectors/manifest.json` sha256 per file; 3,024 price rows + 690 v2 rows |
 
 
-| Artifact | Bytes |
+| Artifact | Bytes (measured build) |
 |---|---|
 | site | 428,124 |
 | factory | 183,047 |
 | escrow | 179,537 |
 | mock-ft | 125,535 |
+
+Sizes from one local `cargo near build non-reproducible-wasm` run; rebuild with step 2 of Quickstart to reproduce them (non-reproducible builds vary slightly between machines).
 
 ## Layout
 
@@ -128,6 +130,8 @@ Diff: `git diff pre-hackathon..hackathon-submission`. After publishing, https://
 Libraries, templates and AI-generated code are listed in `ATTRIBUTION.md`.
 
 ## Origin, license, hackathon
+
+Port of an MIT-licensed EVM product; provenance and archive hash in `ORIGIN.md`, upstream notice in `ATTRIBUTION.md`. The MIT license is kept.
 
 Tracks: `nfts`, `realworld`. Each slot is a NEP-171 token that carries tenancy rights, so the asset does something. Submission checklist, payload fields, and deadline: `SUBMISSION-PREP.md`.
 

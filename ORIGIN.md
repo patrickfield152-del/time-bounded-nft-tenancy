@@ -12,7 +12,7 @@ repository; there is no second upstream.
 | Origin branch | `main` |
 | Origin HEAD | `82ff6db8d7239475aafbc5aac23175907583fa80` |
 | Origin archive | `https://codeload.github.com/vibecodermaxi/websitekit/tar.gz/82ff6db8d7239475aafbc5aac23175907583fa80` |
-| Archive sha256 | `e870b91c30be297345d223acdc3ff9e560b7ba0eaef524d131c746e7ff4537e2` |
+| Archive sha256 | `28b0132e1b27197d02df54b97e76a9e09c520d128ba212ff89ec8ac257839f10` |
 | Local baseline commit | `30779ef151801b79a4385ebe92c9db6c53dff3e3` |
 | Remote baseline commit | `61c45d868ab6190c57bbbe0959046f7de3be952c` |
 | Remote build box | `maxwell-fr9jn` (`cmp_e72322cece72`), checkout at `~/work/stele` |
@@ -32,8 +32,8 @@ contracts on NEP-171/177/178/181 for the slot tokens and NEP-141 for settlement,
 sub-accounts and on-chain storage staking replacing EVM clones and balance storage; the tenancy
 becomes a time-bounded function-call access key enforced by the contract, replacing ERC-4907
 user-expiry; and the SDK is rebuilt on `near-api-js` 7.5.3, with `viem` dropped entirely. The two
-pure-math SDK modules survive verbatim as parity twins, because their arithmetic is the thing being
-held byte-identical across platforms; everything that touches chain transport is rewritten.
+pure-math SDK modules carry the origin's arithmetic as parity twins, pinned to the origin contracts
+by the generated vectors; everything that touches chain transport is rewritten.
 
 ## Remote and publishing
 

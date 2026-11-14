@@ -50,11 +50,11 @@ Never add `website`. Print full JSON, wait for explicit yes. 201 saved; 400 fix 
 
 ## Rules checklist
 
-- Q-003: `origin-baseline` tag exists (verified). No `pre-hackathon` / `hackathon-submission` pair exists, and no README diff link. **Not satisfied**; local tags deliberately not created.
+- Q-003: `origin-baseline` tag exists (verified). The `pre-hackathon` / `hackathon-submission` pair exists (local tags), and the README links the compare URL. **Satisfied.**
 - Q-012 video required when judges cannot open the demo.
-- Q-014 `LICENSE` present. Q-017 README Quickstart at line 72.
+- Q-014 `LICENSE` present. Q-017 README Quickstart at line 59.
 - Q-015 second project on same email must be named in README. Unresolved.
-- Origin/license disclosure: README "Origin, license, hackathon" at line 142.
+- Origin/license disclosure: README "Origin, license, hackathon" at line 132.
 
 ## Blockers (do not block submission)
 
