@@ -1,6 +1,6 @@
 # SUBMISSION-PREP — stele (LOCAL DRAFT, NOT SUBMITTED)
 
-Track: `nfts` (spec `p0-nfts.md`). Deadline 2026-11-14T23:59:00Z.
+Tracks: `realworld`, `business`. Deadline 2026-11-14T23:59:00Z.
 No push, no remote, no tags, no X post, no submit. Local commit only.
 
 ## Judge quickstart (do X, see Y), MEASURED pre-Celesto-only
@@ -39,7 +39,7 @@ One moment, one visible result. No screenshots-only demo (Q-012). Tags @NEARProt
 | leadName | 2-80 chars | EMPTY |
 | email | valid, <=160, max 2 submissions per address (Q-015) | EMPTY |
 | size | `1` / `2 - 4` / `4 - 6` / `6 - 8` / `8+` | EMPTY |
-| tracks | >=1 track id, each once; `nfts` fits | EMPTY |
+| tracks | >=1 track id, each once; `realworld`, `business` fit | EMPTY |
 | nearAddress | 2-64 lowercase mainnet account the team creates | EMPTY |
 | projectUrl | http(s), <=300, public repo, unique | EMPTY |
 | demoUrl | http(s), <=300, published X post | EMPTY |
