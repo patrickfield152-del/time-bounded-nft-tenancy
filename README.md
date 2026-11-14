@@ -15,14 +15,14 @@ sequenceDiagram
     participant E as Escrow
     participant M as MockFT
     rect rgb(226,238,255)
-    Note over D,F: Deploy: factory stores code and escrow params once
+    Note over D,F: PHASE 1 — Deploy: factory stores code and escrow params once
     D->>F: store_site_code(code)
     D->>F: store_escrow_code(code)
     D->>F: set_escrow_params(params) and allow_token(token, decimals)
     F-->>D: SiteCodeNotStored released
     end
     rect rgb(230,247,235)
-    Note over D,T: Create site: one account per site, a direct factory child
+    Note over D,T: PHASE 2 — Create site: one account per site, a direct factory child
     D->>S: buildCreateSite(options)
     S->>F: create_escrowed_site(vault, site, config)
     F->>F: deploy_site must_be_child and floor_for checks
@@ -35,7 +35,7 @@ sequenceDiagram
     F-->>D: SiteCreated event
     end
     rect rgb(255,244,214)
-    Note over M,E: Fund vault: only the bound settlement token may book or reserve
+    Note over M,E: PHASE 3 — Fund vault: only the bound settlement token may book or reserve
     S->>M: ft_transfer_call(amount, msg)
     M->>E: ft_on_transfer(amount, msg)
     E->>E: push_deposit or reserve, other msg refunds
@@ -43,7 +43,7 @@ sequenceDiagram
     E->>E: credit(beneficiary) then advance_head
     end
     rect rgb(243,232,255)
-    Note over D,T: Buy and settle terms: terms hash, cooldown and deadline gate every buy
+    Note over D,T: PHASE 4 — Buy and settle terms: terms hash, cooldown and deadline gate every buy
     D->>S: Promise.all readSettlementAsset, readSlots, readSiteTerms
     D->>S: buildBuy(options)
     S->>T: buy(token_id, max_price, expected_terms, deadline_ns)
@@ -56,7 +56,7 @@ sequenceDiagram
     end
     end
     rect rgb(255,232,232)
-    Note over T,E: Split payout and events: split legs book before ownership moves
+    Note over T,E: PHASE 5 — Split payout and events: split legs book before ownership moves
     T->>T: execute_buy settle_rent then compute_split
     T-->>D: credit payout, protocol_cut and site_cut
     T->>T: mint or nft_transfer the slot
