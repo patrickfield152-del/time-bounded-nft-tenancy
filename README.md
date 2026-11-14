@@ -140,6 +140,13 @@ Release wasm sizes come from `cargo near build non-reproducible-wasm`. The ABI i
 - The factory supplies the site's `min_slot_floor` from the settlement asset's real decimals. Native 24 gives 1e20, and a 6-decimal mock FT gives 100. `new` never derives the floor from `ft_metadata`, because that call is asynchronous.
 - Royalty info is display-only. `buy` never deducts it.
 
+## Baseline and disclosure
+
+Baseline: tag `pre-hackathon` marks the imported tree at `30779ef`. The upstream project is `vibecodermaxi/websitekit`.
+Submission: tag `hackathon-submission` marks the submitted state; `git rev-parse --short hackathon-submission` prints it.
+Diff: `git diff pre-hackathon..hackathon-submission`. After publishing, https://github.com/<owner>/<repo>/compare/pre-hackathon...hackathon-submission.
+Libraries, templates and AI-generated code are listed in `ATTRIBUTION.md`.
+
 ## Origin, license, hackathon
 Port of an MIT-licensed EVM product. Provenance, baseline commit, and archive hash are in `ORIGIN.md`; the upstream notice is reproduced in `ATTRIBUTION.md`. The MIT license is kept.
 
