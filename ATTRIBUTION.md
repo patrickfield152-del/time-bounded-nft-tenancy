@@ -10,6 +10,8 @@ Copyright (c) 2026 websitekit
 ```
 
 `LICENSE` holds the full permissive terms. It carries that notice and the port's own copyright line.
+The upstream repository is `https://github.com/vibecodermaxi/websitekit`, branch `main`, HEAD
+`82ff6db8d7239475aafbc5aac23175907583fa80`. [`ORIGIN.md`](ORIGIN.md) holds the archive URL and its sha256.
 
 ## Files carried over verbatim
 Two SDK modules cross the platform boundary untouched.
