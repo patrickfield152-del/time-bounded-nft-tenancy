@@ -1,6 +1,6 @@
 # stele
 
-**NEP-171 slot NFTs + time-bounded function-call-key tenancy, NEP-141 settlement.**
+**NEP-171 slot NFTs + time-bounded function-call-key tenancy, NEP-141 settlement.** Tracks: `nfts`, `realworld`. Licence: MIT. Baseline: tag `pre-hackathon` marks the imported tree at `30779ef` (upstream `vibecodermaxi/websitekit`).
 
 A publisher divides a page into named slots. Each slot is a NEP-171 token. The holder can write the content behind the slot. The holder can also sell the slot on the site's own mean-reverting price curve. A holder can rent the slot for a fixed term. Tenancy is a time-bounded function-call access key. The tenant signs content writes with a session key scoped to the site contract and to `edit`. A function-call key carries no expiry of its own, so the contract asserts the rental window on every gated call. Settlement is NEP-141, and the native branch pays native NEAR. Payouts go through a pull ledger. Every site is its own account, with its own storage and its own frozen code.
 
@@ -112,6 +112,24 @@ Vectors: **3,024** take-price rows + **690** v2 ask/rent/fee rows, with a sha256
 - SDK: 15 tests, 0 failed in `packages/sdk/src/stele.test.ts`.
 
 Totals: **3,714 parity vector executions**, 38 Rust + 15 SDK tests, **0 failed**.
+
+### Repro steps
+1. Typecheck the SDK: do `pnpm -C packages/sdk typecheck` → see exit code 0, no output.
+2. Run the SDK suite: do `pnpm exec vitest run packages/sdk/src` → see `Tests  15 passed (15)`.
+3. Run the Rust parity/terms/views suites: do `cargo test -p stele-site --test parity && cargo test -p stele-site --test terms && cargo test -p stele-site --test views` → see 10 + 26 + 2 test results, `0 failed`.
+4. Wasm-free dry run (zero funds, sandbox): do `STELE_SKIP_ESCROW=1 STELE_SKIP_EXPIRY=1 node scripts/sandbox-dry-run.mjs` (with the four wasm paths set after step 2 of Quickstart) → see `DRY-RUN OK`.
+
+## Claim → evidence
+
+| Claim | Evidence |
+|---|---|
+| Slots are NEP-171 tokens | `contracts/site/src/lib.rs` NEP-171 impl; `vectors/encumbrance-vectors.jsonl` parity rows |
+| Buy is guarded by deadline/terms/cooldown/slippage | `contracts/site/src/lib.rs:974` `plan_buy` panics `DeadlineExpired`, `TermsChanged`, `CooldownActive`, `SlippageExceeded` |
+| Price curve matches the vector grid | `contracts/site/tests/parity.rs:155` `price_and_effective_floor_match_every_computable_row`, `parity.rs:448` `ask_rows_match_the_reversion_base_ceiling_and_quote` |
+| Payout goes through a pull ledger | `contracts/escrow/src/lib.rs:366` `release` → `credit` (`lib.rs:969`) → `advance_head` |
+| Terms ratchet tighten-only | `contracts/site/tests/terms.rs:515` `floor_policy_ratchets_tighten_only` |
+| 15 SDK tests, 0 failed | `pnpm exec vitest run packages/sdk/src` → `Tests  15 passed (15)` |
+| 3,714 vector executions | `vectors/manifest.json` sha256 per file; 3,024 price rows + 690 v2 rows |
 
 The ABI is embedded, `opt-level = "z"`, and factory/escrow/mock-ft are `cdylib`-only:
 
