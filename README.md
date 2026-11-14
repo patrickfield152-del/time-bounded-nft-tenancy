@@ -22,44 +22,55 @@ sequenceDiagram
     F-->>D: SiteCodeNotStored released
     end
     rect rgb(230,247,235)
-    Note over D,T: PHASE 2 — Create site: one account per site, a direct factory child
+    Note over D,T: PHASE 2 — Create site account: vault and site deployed as factory children
     D->>S: buildCreateSite(options)
     S->>F: create_escrowed_site(vault, site, config)
-    F->>F: deploy_site must_be_child and floor_for checks
-    F->>E: new(factory) then bind(site, params)
-    F->>T: new(owner, treasury, config)
+    F->>F: must_be_child and floor_for checks
+    F->>E: create_account then new(factory)
+    F->>T: create_account then new(owner, treasury, config)
     alt direct site
     S->>F: create_site(payload)
     end
-    E-->>F: bind_callback(terms)
     F-->>D: SiteCreated event
     end
     rect rgb(255,244,214)
-    Note over M,E: PHASE 3 — Fund vault: only the bound settlement token may book or reserve
+    Note over F,E: PHASE 3 — Bind escrow: pinned treasury and params committed before booking
+    F->>T: storage_deposit(vault_id)
+    F->>E: bind(site, escrow_params)
+    E->>T: terms()
+    E-->>F: bind_callback(terms)
+    E->>T: own_get_owner()
+    E->>E: bind_owner_callback caches publisher, book_inner
+    F-->>F: escrowed_bind_callback records vault_of, refunds change
+    end
+    rect rgb(243,232,255)
+    Note over M,E: PHASE 4 — Fund vault: only the bound settlement token may book or reserve
     S->>M: ft_transfer_call(amount, msg)
     M->>E: ft_on_transfer(amount, msg)
     E->>E: push_deposit or reserve, other msg refunds
     D->>E: release(deposit_id) after is_mature
     E->>E: credit(beneficiary) then advance_head
     end
-    rect rgb(243,232,255)
-    Note over D,T: PHASE 4 — Buy and settle terms: terms hash, cooldown and deadline gate every buy
+    rect rgb(255,232,232)
+    Note over D,T: PHASE 5 — Buy with terms guard: hash, cooldown and deadline gate every buy
     D->>S: Promise.all readSettlementAsset, readSlots, readSiteTerms
     D->>S: buildBuy(options)
     S->>T: buy(token_id, max_price, expected_terms, deadline_ns)
-    T->>T: plan_buy requires TermsChanged and SlippageExceeded guards
+    T->>T: plan_buy DeadlineExpired, TermsChanged, CooldownActive, SlippageExceeded
+    end
+    rect rgb(224,247,250)
+    Note over T,M: PHASE 6 — Settle split payout: credits book before ownership moves
     alt native deposit
     T->>T: storage_top_up then storage_deposit
     T-->>T: settle_buy_callback
     else settlement token
     M->>T: ft_on_transfer dispatch, price never exceeds max_price
     end
+    T->>T: execute_buy settle_rent then credit payout, protocol_cut and site_cut
     end
-    rect rgb(255,232,232)
-    Note over T,E: PHASE 5 — Split payout and events: split legs book before ownership moves
-    T->>T: execute_buy settle_rent then compute_split
-    T-->>D: credit payout, protocol_cut and site_cut
-    T->>T: mint or nft_transfer the slot
+    rect rgb(255,248,225)
+    Note over D,T: PHASE 7 — NFT slot and events: first claim mints, every sale emits
+    T->>T: mint_with_metadata or external_transfer, listing cleared
     T-->>D: SlotBought and TermsLocked events
     end
 ```
