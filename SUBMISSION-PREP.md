@@ -3,12 +3,12 @@
 Track: `nfts` (spec `p0-nfts.md`). Deadline 2026-11-14T23:59:00Z.
 No push, no remote, no tags, no X post, no submit. Local commit only.
 
-## Judge quickstart (do X → see Y), MEASURED pre-Celesto-only
+## Judge quickstart (do X, see Y), MEASURED pre-Celesto-only
 
 ```
 pnpm -C packages/sdk typecheck     -> EXIT 0
 pnpm -C packages/react typecheck   -> EXIT 0
-pnpm exec vitest run packages/sdk/src -> 1 file / 12 tests passed (1.44s)
+pnpm exec vitest run packages/sdk/src -> 1 file / 15 tests passed
 cargo test -p stele-site --test parity -> 10 passed; 0 failed
 cargo test -p stele-site --test terms  -> 26 passed; 0 failed
 cargo test -p stele-site --test views  -> 2 passed; 0 failed
@@ -26,9 +26,9 @@ git diff HEAD --check              -> EXIT 0; git status --short empty
 
 1. Mint a slot NFT, write content behind the slot, read it back.
 2. Rent the slot: issue a time-bounded function-call access key, sign an `edit`.
-3. Let the term expire; show the same signed call rejected. One moment, one
-   visible result. No screenshots-only demo (Q-012). Tags @NEARProtocol,
-   #NEARHackathon. Main writes no post.
+3. Let the term expire. Show the same signed call rejected.
+
+One moment, one visible result. No screenshots-only demo (Q-012). Tags @NEARProtocol, #NEARHackathon. Main writes no post.
 
 ## Payload fields — ALL EMPTY, human supplies every value
 
@@ -46,26 +46,19 @@ git diff HEAD --check              -> EXIT 0; git status --short empty
 | idea | 20-2000 chars | EMPTY |
 | consent | `true` only after verbatim notice + human yes | EMPTY |
 
-Never add `website`. Print full JSON, wait for explicit yes. 201 saved;
-400 fix `fields` + same requestId; 403 stop; 409 stop; 413 shorten; 503 retry
-same requestId.
+Never add `website`. Print full JSON, wait for explicit yes. 201 saved; 400 fix `fields` + same requestId; 403 stop; 409 stop; 413 shorten; 503 retry same requestId.
 
 ## Rules checklist
 
-- Q-003: `origin-baseline` tag exists (verified), but no `pre-hackathon` /
-  `hackathon-submission` pair and no README diff link. **Not satisfied**;
-  local tags deliberately not created.
+- Q-003: `origin-baseline` tag exists (verified). No `pre-hackathon` / `hackathon-submission` pair exists, and no README diff link. **Not satisfied**; local tags deliberately not created.
 - Q-012 video required when judges cannot open the demo.
-- Q-014 `LICENSE` present. Q-017 README Quickstart at line 33.
+- Q-014 `LICENSE` present. Q-017 README Quickstart at line 72.
 - Q-015 second project on same email must be named in README. Unresolved.
-- Origin/license disclosure: README "Origin and license" at line 114.
+- Origin/license disclosure: README "Origin, license, hackathon" at line 142.
 
 ## Blockers (do not block submission)
 
-Celesto `Trial credit is too low to start this sandbox` → clippy/fmt/
-cargo-near-check BLOCKED-BY-CELESTO. Firecrawl credits BLOCKED. Exa MCP 402 →
-direct REST. BoxLite §6 MEASURED `qvd8ZYJlMsng` (two 401 quoting failures
-recorded verbatim before the successful run).
+Celesto `Trial credit is too low to start this sandbox` → clippy/fmt/cargo-near-check BLOCKED-BY-CELESTO. Firecrawl credits BLOCKED. Exa MCP 402 → direct REST. BoxLite §6 MEASURED `qvd8ZYJlMsng` (2 401 quoting failures recorded verbatim before the successful run).
 
 ## Attestation
 
