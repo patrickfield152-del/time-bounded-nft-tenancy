@@ -45,4 +45,3 @@ __pycache__/
 apps/demo/next-env.d.ts
 
 # Resolved on the build box; the pinned direct versions are the contract.
-Cargo.lock
