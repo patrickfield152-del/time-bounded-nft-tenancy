@@ -143,7 +143,7 @@ Release wasm sizes come from `cargo near build non-reproducible-wasm`. The ABI i
 ## Baseline and disclosure
 
 Baseline: tag `pre-hackathon` marks the imported tree at `30779ef`. The upstream project is `vibecodermaxi/websitekit`.
-Submission: tag `hackathon-submission` marks the submitted state; `git rev-parse --short hackathon-submission` prints it.
+Submission: tag `hackathon-submission` marks the submitted state. `git rev-parse --short hackathon-submission` prints it.
 Diff: `git diff pre-hackathon..hackathon-submission`. After publishing, https://github.com/<owner>/<repo>/compare/pre-hackathon...hackathon-submission.
 Libraries, templates and AI-generated code are listed in `ATTRIBUTION.md`.
 
