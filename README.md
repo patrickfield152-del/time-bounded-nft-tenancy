@@ -143,4 +143,4 @@ Release wasm sizes come from `cargo near build non-reproducible-wasm`. The ABI i
 ## Origin, license, hackathon
 Port of an MIT-licensed EVM product. Provenance, baseline commit, and archive hash are in `ORIGIN.md`; the upstream notice is reproduced in `ATTRIBUTION.md`. The MIT license is kept.
 
-Tracks: `realworld`, `business`. Submission checklist, payload fields, and deadline: `SUBMISSION-PREP.md`.
+Tracks: `nfts`, `realworld`. Each slot is a NEP-171 token that carries tenancy rights, so the asset does something. Submission checklist, payload fields, and deadline: `SUBMISSION-PREP.md`.
