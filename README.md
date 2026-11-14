@@ -5,7 +5,6 @@
 A publisher divides a page into named slots. Each slot is a NEP-171 token. The holder can write the content behind the slot. The holder can also sell the slot on the site's own mean-reverting price curve. A holder can rent the slot for a fixed term. Tenancy is a time-bounded function-call access key. The tenant signs content writes with a session key scoped to the site contract and to `edit`. A function-call key carries no expiry of its own, so the contract asserts the rental window on every gated call. Settlement is NEP-141, and the native branch pays native NEAR. Payouts go through a pull ledger. Every site is its own account, with its own storage and its own frozen code.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontSize":"14px"}}}%%
 sequenceDiagram
     accTitle: stele runtime flow
     accDescr: Seven phases from code deploy to slot mint: escrow bind, vault funding, guarded buy, split payout.
