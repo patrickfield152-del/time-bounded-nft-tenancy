@@ -1,18 +1,10 @@
 /**
- * Numbers at the boundary — the conversions every wire value takes.
- *
- * Two hazards this module centralizes:
- *
- * 1. **A JSON number is only safe up to 2^53 − 1.** Nanosecond timestamps and
- *    u64 amounts both exceed it, so anything crossing the wire as a number goes
- *    through `toU64`/`nsToJson` and refuses to round.
- * 2. **`u128` rides the wire as a decimal string.** `fromU128` (settlement) and
- *    `u64` here both parse strictly; a silent `Number()` is the rounding bug
- *    every other helper exists to prevent.
- *
- * Seconds-to-nanoseconds conversion lives here too, because the contract keeps
- * configuration in seconds and state in nanoseconds, and both sides of the SDK
- * need the same divisor.
+ * Wire-number conversions. One definition for the whole SDK.
+ * - A JSON number is exact only up to 2^53 - 1. Nanosecond timestamps and
+ *   `u64` amounts exceed it. Send them through `toU64` or `nsToJson`.
+ * - `u128` travels as a decimal string. `fromU128` and `u64` parse strictly.
+ *   A silent `Number()` is the rounding bug these helpers prevent.
+ * - The contract keeps seconds in configuration and nanoseconds in state.
  */
 
 /** Nanoseconds per second: the contract's state clock. */
@@ -21,17 +13,12 @@ export const NS_PER_SECOND = 1_000_000_000n;
 /** `BigInt(Number.MAX_SAFE_INTEGER)`: the largest exact JSON number. */
 export const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
-/**
- * A wire `u64` (JSON number or decimal string) as an exact `bigint`.
- */
+/** A wire `u64` (number or decimal string) as an exact `bigint`. */
 export function wireU64(value: number | string): bigint {
   return typeof value === 'number' ? BigInt(Math.trunc(value)) : BigInt(value);
 }
 
-/**
- * A `bigint` that must survive as a JSON number. Throws rather than rounding —
- * `field` names the argument so the error points at the builder that lied.
- */
+/** A `bigint` for JSON. Throws instead of rounding; `field` names the caller. */
 export function jsonU64(value: bigint | number, field: string): number {
   const asBig = typeof value === 'number' ? BigInt(Math.trunc(value)) : value;
   if (asBig < 0n || asBig > MAX_SAFE) {

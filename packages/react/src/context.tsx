@@ -2,21 +2,17 @@
 
 /**
  * `<SlotProvider>` — one chain read for the whole page, shared by every `<Slot>` under it.
- *
  * A page with twelve slots is ONE wave of parallel views, not twelve components each fetching their
  * own slot: the provider owns the read, so twelve slots cost one `readSlots` call. That is
  * load-bearing rather than an optimization — twelve independent fetches reintroduce exactly the
  * per-component round-trip pattern this design exists without.
- *
  * Live updates are an optional upgrade, not a default. `refetchOnFocus` is on for the cheapest
  * liveness that matters; `pollMs` is off because a page left open in a background tab should not
  * bill someone's RPC quota all afternoon.
- *
  * **Wallets are a separate layer.** This provider reads only, with `readerFromUrl(rpcUrl)`; sign-in
  * and signing belong to `near-connect-hooks`' `<NearProvider>` around the app, which `useBuy` uses
  * through `useNearWallet()`. Keeping the two apart is what lets a read-only page render with no
  * wallet at all.
- *
  *     <NearProvider config={{ network: 'testnet' }}>       // near-connect-hooks
  *       <SlotProvider config={site} rpcUrl={rpcUrl}>       // this file
  *         <Slot id="hero.headline" />
@@ -44,7 +40,7 @@ import {
   type SlotState,
 } from '@stele/sdk';
 
-import { ContentStore } from './content-store';
+import { ContentStore } from './store';
 
 export interface SteleContextValue {
   config: SiteConfig;

@@ -31,5 +31,5 @@ export type { UseBuyResult, BuyQuote, BuyPhase } from './useBuy';
 
 export { formatAmount } from './format';
 
-export { ContentStore, fetchAndVerify } from './content-store';
-export type { ContentStatus, FetchContentOptions } from './content-store';
+export { ContentStore, fetchAndVerify } from './store';
+export type { ContentStatus, FetchContentOptions } from './store';

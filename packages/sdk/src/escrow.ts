@@ -1,18 +1,12 @@
 /**
- * The escrow vault — one vault per board, outside the site contract.
- *
- * A vault's income arrives by being the site's treasury: `sweep_treasury()` is permissionless and
- * always pays the pinned treasury, and `withdraw_for(vault)` is permissionless too, so `book()` is
- * two cross-contract calls that move the site's whole cut into the vault. What those calls
- * delivered is measured as a balance delta on the callback — never trusted from the return value.
- *
- * **`claimable` cannot be a local view.** The origin read the site's own
- * `slotOf`/`ownerOfOrZero`/`treasuryBalance`/`pendingWithdrawals(vault)` inside the vault, which a
- * NEAR contract cannot do synchronously. So the vault caches the site legs at each book
- * (`claimable_local`) and `readClaimable` composes that cache with the live site legs in parallel.
- * The composed number is what a claim may drain, capped at the position's last price; whether the
- * claim is ALLOWED (dark, past the delay, not already claimed this episode) is the contract's
- * decision and its own guards.
+ * The escrow vault: one vault per board, outside the site contract.
+ * - A vault's income arrives by being the site's treasury. `sweep_treasury()`
+ *   and `withdraw_for(vault)` are permissionless. `book()` moves the cut with
+ *   two cross-contract calls; measure the result as a callback balance delta.
+ * - `claimable` cannot be a local view. The origin read `slotOf`,
+ *   `ownerOfOrZero`, `treasuryBalance` and `pendingWithdrawals(vault)` inside
+ *   the vault. The vault caches those legs as `claimable_local`; `readClaimable`
+ *   composes the cache with live legs and caps a claim at the last price.
  */
 import { slotKey } from './keys';
 import { readView, type AccountId, type CallRequest, type Reader } from './near';
@@ -27,12 +21,10 @@ const NO_DEPOSIT = '0';
 
 /**
  * Approves the vault to surrender one position, and tells it the approval id.
- *
  * NEP-178 approves **per token**, not per collection: there is no `setApprovalForAll` on NEAR. The
  * `msg` is what makes the vault record `approval_id`, because `nft_approve` returns it to the
  * CALLER and the vault is not the caller — the site fires `nft_on_approve(token_id, owner_id,
  * approval_id, msg)` at the approved account, fire-and-forget, and the vault stores it.
- *
  * A standing approval is not caller consent: `claim` still asserts the predecessor is the holder.
  */
 export function buildApproveForVault(options: {
@@ -81,7 +73,6 @@ export function buildRelease(options: { vault: AccountId; depositId: bigint | nu
  * Claims a position whose publisher has gone dark: three phases on the contract side — the same
  * two-call book, the guards, then a surrender of the token to the vault itself. Crediting happens
  * in a private callback, so a failed transfer credits nothing.
- *
  * `minPaid` is the claimer's floor: the transaction reverts rather than surrendering a position for
  * less.
  */
@@ -155,7 +146,6 @@ interface DepositRecord {
 
 /**
  * Every deposit on a vault, with the vault's own maturity verdict beside each.
- *
  * Read from the contract rather than recomputed here: the predicate decides both sides of every
  * dispute, and a TypeScript twin of it would be a second implementation with no shared vector.
  */
@@ -185,11 +175,9 @@ export async function readDeposits(reader: Reader, vault: AccountId): Promise<Va
 
 /**
  * What `claim` could drain from a vault for one position, and the four legs it is made of.
- *
  * `cached` is the vault's own `claimable_local` — the site legs as they stood at the last book.
  * The three live legs are what a claim's own book will turn into a fresh, immature deposit before
  * the drain runs, which is why they count here even though the vault does not hold them yet.
- *
  * `claimable` is `min(available, lastPrice)` and nothing more. It is deliberately not a prediction
  * that a claim will succeed: the dark clock, the claim delay, the once-per-episode rule and the
  * holder assertion are the contract's, and a client that reimplemented them would be a second

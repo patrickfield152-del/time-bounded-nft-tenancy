@@ -1,27 +1,18 @@
 //! stele site contract: NEP-171 slot NFTs, the market spine, and the pull
 //! ledger.
-//!
-//! Wave 2 implements the state surface and the money spine from `p0-nfts.md`
-//! sections 3.3, 3.6 and 4 steps 5-6. The `NonFungibleToken` derive generates
-//! NEP-171/177/178/181 and NEP-145. The `Owner` derive holds the admin slot;
-//! there is deliberately no `owner_id` field. This crate adds registration, the
-//! floor/ask levers, `buy`/`buy_for` with the storage gate, the pull ledger and
-//! the admin setters.
-//!
+//! Wave 2 builds the state surface and money spine from `p0-nfts.md`
+//! sections 3.3, 3.6 and 4 steps 5-6. `NonFungibleToken` derives
+//! NEP-171/177/178/181 and NEP-145; `Owner` holds the admin slot, with no
+//! `owner_id` field. This crate adds registration, the floor/ask levers,
+//! `buy`/`buy_for` with the storage gate, the pull ledger and admin setters.
 //! Tenancy (`list_for_rent`, `rent`, `extend_rental`, `claim_rent`,
-//! `end_rental`, `edit`, `can_edit`, `set_editor`, `editor_of`) lives here too.
-//! A sale settles the outgoing owner's rent and clears the listing. The term
-//! itself survives the sale: a tenancy that a take could destroy would make the
-//! slot unsellable.
-//!
-//! Module map:
-//! - [`pricing`]: the pure `U256` money math (the parity target).
-//! - [`rentals`]: the pure rent math and its state-machine predicates.
-//! - [`terms`]: the configuration clamps and holder-safe ratchets.
-//! - [`events`]: the 39 ported NEP-297 events.
-//! - [`transfer_hook`]: approval revocation before storage accounting.
-//! - [`views`]: every read-only method.
-//! - [`ft_receiver`]: the NEP-141 `ft_on_transfer` entry point.
+//! `end_rental`, `edit`, `can_edit`, `set_editor`, `editor_of`) lives here.
+//! A sale settles the outgoing rent, clears the listing, and keeps the term.
+//! Modules: [`pricing`] pure `U256` money math (the parity target);
+//! [`rentals`] pure rent math and predicates; [`terms`] clamps and ratchets;
+//! [`events`] the 39 ported NEP-297 events; [`transfer_hook`] approval
+//! revocation; [`views`] every read-only method; [`ft_receiver`] the NEP-141
+//! `ft_on_transfer` entry point.
 
 pub mod events;
 pub mod ft_receiver;
@@ -211,11 +202,9 @@ pub struct Contract {
 #[near]
 impl Contract {
     /// Origin `initialize`, plus the two factory-supplied treasury fields.
-    ///
     /// The factory supplies `min_slot_floor` from the settlement asset's real
     /// decimals: native 24 gives `10^20`; the 6-decimal mock FT gives `100`.
     /// `new` does not read `ft_metadata`, because that call is asynchronous.
-    ///
     /// Documented deviation: the origin took a treasury address that the owner
     /// could repoint until a factory pinned it later. On NEAR the factory
     /// creates an escrowed site whose `Owner` derive slot is the publisher, not
@@ -655,7 +644,7 @@ impl Contract {
         SteleEvent::RoyaltySet { bps }.emit();
     }
 
-    // ---------------------------------------------------------------- tenancy
+    // Tenancy
 
     /// Origin `listForRent`: the owner publishes a daily rate and a duration
     /// cap. `rate_per_day == 0` delists. One yocto so a leaked function-call
@@ -736,7 +725,6 @@ impl Contract {
     /// Anyone may rent; the attached deposit is a budget (the change is
     /// credited back) and the gross cost splits into protocol, site and the
     /// escrowed net.
-    ///
     /// An existing rental entry blocks a new term even after it lapses —
     /// permissionless `end_rental` is what returns the slot to the market.
     /// The FT branch is `ft_on_transfer` calling [`Contract::rent_inner`].
@@ -764,7 +752,6 @@ impl Contract {
     /// the listing's current rate. The cap binds the remaining window (the term
     /// restarts from now), so repeated extensions can never push a buyer past
     /// the listing's advertised term.
-    ///
     /// Settle-then-restart: the outgoing term is flushed first, then its
     /// unearned remainder rolls forward as the carry of a fresh linear term.
     /// The FT branch is `ft_on_transfer` calling [`Contract::extend_inner`].
@@ -1066,7 +1053,6 @@ impl Contract {
 
     /// The single money spine. `charged` is the native attached deposit or the
     /// transferred FT amount; it is a budget, never the price.
-    ///
     /// Returns `Value(price)` for an inline native settlement,
     /// `Value(change)` for an FT settlement (the NEP-141 refund convention) and
     /// `Promise` when the recipient's storage top-up needs a second receipt.
@@ -1272,7 +1258,6 @@ impl Contract {
     /// Books what a term has earned into the CURRENT owner's pull ledger and
     /// marks it claimed. Returns the delta moved out of rent escrow; an absent
     /// or cleared term returns zero.
-    ///
     /// Shared by `claim_rent`, `extend_rental`, `end_rental` and `execute_buy`,
     /// so every path that can change who is owed the stream flushes it first.
     /// Accrual is linear over the term and clamps at expiry, which makes the

@@ -8,16 +8,16 @@
     "sandbox:dry-run": "node scripts/sandbox-dry-run.mjs",
     "test:sandbox": "vitest run tests/sandbox"
   },
-  "packageManager": "pnpm@10.4.1",
+  "packageManager": "pnpm@12.18.0",
   "engines": {
-    "node": ">=22.22.2",
-    "pnpm": ">=10.4.1"
+    "node": ">=26.13.1",
+    "pnpm": ">=12.18.0"
   },
   "devDependencies": {
     "near-api-js": "7.5.3",
     "near-sandbox": "0.3.5",
-    "tsx": "^4",
-    "typescript": "^5",
-    "vitest": "4.1.10"
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
   }
 }

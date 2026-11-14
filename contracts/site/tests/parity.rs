@@ -13,7 +13,7 @@ use serde::Deserialize;
 use stele_site::pricing::{self, compute_split, compute_take_price};
 use stele_site::rentals::{self, accrual, rent_cost, rent_split};
 
-// ------------------------------------------------------------------ fixtures
+// Fixtures
 
 fn vectors_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vectors")
@@ -44,7 +44,7 @@ fn num(value: &str) -> u64 {
     value.parse().unwrap_or_else(|_| panic!("not a u64: {value}"))
 }
 
-// ------------------------------------------------------------------ price grid
+// Price grid
 
 #[derive(Debug, Deserialize)]
 struct Leg {
@@ -198,7 +198,7 @@ fn overflow_rows_revert_exactly_where_solidity_does() {
     }
 }
 
-// ------------------------------------------------------------------ v2 grid
+// V2 grid
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind")]

@@ -49,7 +49,7 @@ fn assert_panics_with<F: FnOnce()>(f: F, needle: &str) {
     );
 }
 
-// ---------------------------------------------------------------- economics
+// Economics
 
 #[test]
 fn payout_bps_floor_boundary() {
@@ -271,7 +271,7 @@ fn total_rent_bps_saturates_on_overflow() {
     );
 }
 
-// ----------------------------------------------------------------- ratchets
+// Ratchets
 
 #[test]
 fn ratchet_take_bps_only_decreases() {
@@ -408,7 +408,7 @@ fn ratchet_payout_panic_precedes_absolute_reversion_panic() {
     );
 }
 
-// -------------------------------------------------------------- floor policy
+// Floor policy
 
 #[test]
 fn floor_delta_absolute_band() {
@@ -540,7 +540,7 @@ fn floor_policy_ratchets_tighten_only() {
     );
 }
 
-// ---------------------------------------------------------------- rent terms
+// Rent terms
 
 #[test]
 fn check_rent_terms_rechecks_band_and_term() {

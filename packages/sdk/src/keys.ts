@@ -1,30 +1,18 @@
 /**
- * Slot identity — and the one decision everything else follows from.
- *
- *     token_id = "hero.headline"      // the readable dotted key, stored as-is
- *
- * The origin hashed the key in the client (`uint256(keccak256(bytes(key)))`). An EVM contract only
- * sees a word, so it had to. NEAR stores a `String`. The hash bought nothing and took from the
- * indexer the one thing it needs: a token id a person can read. The readable key IS the token id —
- * the documented deviation from the origin, and the reason `slotKey` is now a validator, not a
- * hash.
- *
- * Two consequences, both intended:
- *
- *   - A key is public. Anyone who reads the chain learns the page's structure. The site's own
- *     config publishes that structure anyway, and `registered` keeps unlisted keys unbuyable until
- *     the owner registers them.
- *   - Enumeration is explicit. A `LookupMap` has no range, so the site carries a `registered`
- *     vector and `registered_slots_page`. A client does not need them — a site knows its own keys
- *     from config — but indexers and marketplaces do.
- *
- * There is no reverse function, and there cannot be one. A site that wants to display its keys
- * reads them from its own config.
+ * Slot identity: the readable dotted key IS the token id.
+ * - token_id = "hero.headline" is stored as-is. The origin hashed the key
+ *   with `uint256(keccak256(bytes(key)))`; NEAR stores a `String`, so hashing
+ *   bought nothing and hid the key from the indexer. `slotKey` is now a
+ *   validator, not a hash.
+ * - A key is public. Anyone who reads the chain learns the page's structure. The site's config publishes it anyway.
+ *   `registered` keeps unlisted keys unbuyable until the owner registers them.
+ * - A `LookupMap` has no range, so the site carries a `registered` vector and
+ *   `registered_slots_page` for indexers and marketplaces.
+ * - There is no reverse function. A site reads its keys from its own config.
  */
 
 /**
  * Slot keys are namespaced dotted paths: `hero.headline`, `nav.link.1`, `footer.cta`.
- *
  * Lowercase only, and never leading/trailing separators: a key is an on-chain identity that will
  * outlive several front ends, and `Hero.Headline` beside `hero.headline` is two positions selling
  * the same pixels.
@@ -65,7 +53,6 @@ export function assertValidSlotKey(key: string): void {
 
 /**
  * The token id for a slot. Validates, then returns the key unchanged.
- *
  * Kept as a function rather than a cast so every call site reads as "this string is an identity",
  * and so a future change to the identity scheme has one place to land.
  */
@@ -76,7 +63,6 @@ export function slotKey(key: string): string {
 
 /**
  * Validates many keys and reports ALL failures together.
- *
  * Duplicates are rejected here rather than by the contract: `register_slots` writes the first
  * occurrence and reverts on the second, which leaves the batch half-applied and a `floors` array
  * whose length no longer matches anything.

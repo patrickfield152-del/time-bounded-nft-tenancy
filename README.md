@@ -17,9 +17,9 @@ own account with its own storage and its own frozen code.
 | W1 REPO | repository scaffold, toolchain pins, state/type layouts | done |
 | W2 PRIMITIVE | parity vectors, pricing/rentals/terms, site NFT core, SDK/React | done |
 | W3 FLOWS | tenancy/edit/claim, factory, escrow, mock FT, sandbox harness | done, descoped (below) |
-| W4 CLOSE | README, numbers, sweep, clean-room | in progress |
+| W4 CLOSE | README, numbers, sweep, clean-room | done |
 
-### W3 descope (documented, W4 items)
+### W3 descope (still open)
 
 - **Escrowed-site XCC gas.** `create_escrowed_site` fails inside its vault/site XCC chain at receipt
   `i=3` with `Exceeded the prepaid gas` (12.808 TGas); the `+0.89 TGas` is the fixed
@@ -27,23 +27,26 @@ own account with its own storage and its own frozen code.
   raise caps.
 - **Timestamp-based rental expiry.** `sandbox_fast_forward` advances height only; block timestamps do
   not move, so the post-expiry edit and `end_rental`/hash-restore assertions are not reachable in the
-  harness. W4 fixes this by patching `Rental.expiry`/`BlockInfo` instead of advancing height.
+  harness. The fix is to patch `Rental.expiry`/`BlockInfo` instead of advancing height.
 - The descoped dry-run (`STELE_SKIP_ESCROW=1 STELE_SKIP_EXPIRY=1`) finishes `DRY-RUN OK`.
 
 ## Quickstart
 
 ```bash
-# 1. contracts
+# 1. contracts (rustc 1.100.0, pinned by rust-toolchain.toml)
 cargo check --workspace --target wasm32-unknown-unknown
-cargo test -p stele-site --tests            # 10 parity + 26 terms
+cargo test -p stele-site --tests            # 10 parity + 26 terms + 2 views = 38
 
 # 2. wasm artifacts
 for c in site factory escrow mock-ft; do (cd contracts/$c && cargo near build non-reproducible-wasm); done
 
-# 3. client
-corepack pnpm install
+# 3. client (pnpm 12.18.0, Node >= 26.13.1)
+pnpm install
 pnpm -C packages/sdk typecheck
 pnpm -C packages/react typecheck
+pnpm -C packages/sdk build
+pnpm -C packages/react build
+pnpm exec vitest run packages/sdk/src
 
 # 4. zero-funds dry-run (Linux/macOS; WSL2 on Windows)
 STELE_SKIP_ESCROW=1 STELE_SKIP_EXPIRY=1 \
@@ -60,29 +63,39 @@ node scripts/sandbox-dry-run.mjs
   `vectors/manifest.json` (sha256 per file). Reproduce: `cargo test -p stele-site --test parity` —
   10 tests, 0 failed.
 - Terms/ratchet unit tests: **26**, 0 failed (`cargo test -p stele-site --test terms`).
-- wasm sizes (release, ABI embedded): site 482,831 B; factory 252,631 B; escrow 257,875 B; mock-ft
-  172,779 B.
-- Measured claim: **3,714 parity vector executions** (3,024 + 690), 10 parity + 26 terms tests,
-  **0 failed**; wasm sizes above. Gas is not claimed as a headline; the sandbox can print per-receipt
-  `gas_burnt` if a later pass needs it.
+- View/encumbrance tests: **2**, 0 failed (`cargo test -p stele-site --test views`).
+- SDK behavior suite: **12** tests in one file (`packages/sdk/src/stele.test.ts`), 0 failed
+  (`pnpm exec vitest run packages/sdk/src`).
+- Measured claim: **3,714 parity vector executions** (3,024 + 690), 38 Rust + 12 SDK tests,
+  **0 failed**. Gas is not claimed as a headline; the sandbox can print per-receipt `gas_burnt` if a
+  later pass needs it.
+- Prior-wave (W4) release wasm sizes, ABI embedded, not re-measured in this wave: site 482,831 B;
+  factory 252,631 B; escrow 257,875 B; mock-ft 172,779 B.
 
 ## Layout
 
 ```
 near-stele/
 |-- contracts/{site,factory,escrow,mock-ft}
-|-- vectors/{price-vectors.jsonl,v2-vectors.jsonl,manifest.json}
+|-- vectors/{price-vectors.jsonl,v2-vectors.jsonl,encumbrance-vectors.jsonl,manifest.json}
 |-- packages/{sdk,react}
 |-- apps/demo
 |-- scripts/{regen-vectors-from-origin.sh,sandbox-dry-run.mjs}
-`-- tests/sandbox
+|-- tests/sandbox
+|-- rust-toolchain.toml, .nvmrc, pnpm-workspace.yaml
 ```
 
 ## Toolchain pins
 
-Rust >= 1.95 (edition 2024) · near-sdk 5.30.1 · near-sdk-contract-tools 4.0.0 · primitive-types
-0.14.0 · near-api-js 7.5.3 · near-sandbox 0.3.5 · vitest 4.1.10 · Node >= 22.22.2 · pnpm >= 10.4.1 ·
-cargo-near 0.23.0 · near-cli-rs 0.31.1.
+Rust 1.100.0 (edition 2024, `rust-toolchain.toml`) · near-sdk 5.30.2 ·
+near-sdk-contract-tools 4.0.0 · primitive-types 0.14.0 · near-api-js 7.5.3 ·
+near-sandbox 0.3.5 · @hot-labs/near-connect 0.12.0 · near-connect-hooks 1.1.6 ·
+typescript 7.0.2 · tsx 4.23.15 · tsup 9.0.0 · vitest 5.1.0 · next 16.4.6 ·
+react/react-dom 19.3.1 · @types/node 26.6.6 · Node >= 26.13.1 (`.nvmrc`) ·
+pnpm 12.18.0 · cargo-near 0.23.0 · wasm-opt 0.116.1.
+
+`pnpm-workspace.yaml` holds the `overrides` entry that keeps exactly one
+`@hot-labs/near-connect` version in the lockfile. Lockfiles: `Cargo.lock` + `pnpm-lock.yaml`.
 
 ## Environment
 
@@ -91,7 +104,7 @@ cargo-near 0.23.0 · near-cli-rs 0.31.1.
 
 ## Limits
 
-- Escrowed-site creation and timestamp-based expiry tests are descoped to W4 (see above).
+- Escrowed-site creation and timestamp-based expiry tests are descoped (see above).
 - The sandbox is Unix-only and runs zero-funds; no mainnet deployment is part of this repository.
 - The site's `min_slot_floor` is supplied by the factory from the settlement asset's real decimals
   (native 24 ⇒ `1e20`; 6-decimal mock FT ⇒ `100`); it is never derived from `ft_metadata` inside

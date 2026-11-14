@@ -1,30 +1,15 @@
 //! stele factory: per-site sub-account deployment, escrow-vault wiring, and
 //! the rotatable attestor registry.
-//!
-//! Port of the origin factory, escrow and attestor contracts. There is
-//! no `delegatecall` and no clone-proxy on NEAR, so a site is a direct
-//! sub-account of this contract carrying its own copy of the site wasm:
-//! `create_account -> transfer -> deploy_contract -> function_call("new")` in
-//! one receipt batch, exactly the verified factory pattern. Global contracts
-//! are never used (the global NFT primitives are codeless on chain today, and
-//! by-hash references cannot be verified on public RPC).
-//!
-//! ## Code storage
-//!
-//! The wasm is uploaded once by the owner through `store_site_code` /
-//! `store_escrow_code` instead of being baked in with `include_bytes!`. The
-//! economics are identical: the bytes are staked on THIS account, so
-//! `get_required` quotes `site_code.len() * 1e19` yocto per site (every site
-//! gets its own copy, so every site pays for its own code) plus a state
-//! allowance. A caller may instead attach more; see `create_site` for where
-//! the excess goes.
-//!
-//! ## Promise discipline
-//!
-//! Every multi-receipt path ends in a `#[private]` callback that inspects
-//! `is_promise_success()` (or a `#[callback_result]`) and refunds the caller
-//! when the chain failed. Nothing is credited on a failure path; the only
-//! irreversible spend is an account that already exists.
+//! Port of the origin factory, escrow and attestor contracts. NEAR has no
+//! `delegatecall` and no clone-proxy, so a site is a direct sub-account with
+//! its own site wasm: `create_account -> transfer -> deploy_contract -> function_call("new")` in one receipt batch. Global contracts are unused.
+//! - Code storage: the owner uploads the wasm once with `store_site_code`
+//!   and `store_escrow_code` instead of `include_bytes!`. `get_required`
+//!   quotes `site_code.len() * 1e19` yocto per site plus a state allowance.
+//!   A caller may attach more; see `create_site` for the excess.
+//! - Promise discipline: every multi-receipt path ends in a `#[private]`
+//!   callback that checks `is_promise_success()` or a `#[callback_result]`
+//!   and refunds the caller on failure. Nothing is credited on a failure path.
 
 use near_sdk::json_types::{Base64VecU8, U128};
 use near_sdk::store::LookupMap;
@@ -286,7 +271,6 @@ impl Contract {
 
     /// Deploys a site owned by the caller. `settlement_token = None` selects
     /// the native branch; `Some(token)` must be allow-listed.
-    ///
     /// The batch is atomic: if account creation, the code deploy or `new`
     /// fails, every action rolls back, `create_callback` sees the failure and
     /// refunds the whole attached deposit to the payer. Over-attachment beyond
@@ -765,7 +749,6 @@ impl Contract {
 
     /// The site `new` argument object. One builder for both paths so the
     /// escrowed and plain sites can never drift.
-    ///
     /// `treasury` is the site's revenue account and `treasury_pinned` freezes
     /// it: an escrowed site passes the vault and `true`, a plain site passes
     /// `null` and `false` (the site then mirrors `protocol_treasury`, exactly

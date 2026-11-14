@@ -1,34 +1,18 @@
 /**
- * Content addressing — the bytes a slot points at, and the hash the chain holds.
- *
- *     object      = [schemeVersion:u8][kind:u8][payload…]
- *     contentHash = sha256(object)        // 64 lowercase hex characters, stored as a String
- *
- * `payload` is opaque bytes. Not a canonical string with named segments: the framework hashes
- * BYTES, so any structure — JSON for a styled text block, raw bytes for an image — is the caller's
- * concern inside `payload`, and extending that vocabulary never invalidates a hash already on
- * chain.
- *
- * Three decisions carried over from the origin and still load-bearing:
- *
- *   - **sha256, not keccak.** The contract never hashes a page body — it stores the string the
- *     writer submitted and hashes its own tuple for `encumbrance_hash` — so a hash that is also a
- *     CID's multihash buys a backend-free read path. `contentHashToCid` is that payoff.
- *   - **Version and kind live inside the object.** A renderer fetches, verifies, then reads two
- *     bytes and knows what it holds. An unknown version degrades to `fallback` with a warning
- *     instead of the silent blank a bare hash mismatch produces, and `kind` domain-separates text
- *     from an `ipfs://` video reference.
- *   - **Content-only preimage.** No site, no slot key. The chain already binds hash to slot, so
- *     adding them gains nothing and costs deduplication across slots.
- *
- * **Two different base encodings, for two different fields, because NEP-177 says so.** A slot's
- * `page_hash` is a `String` and this package writes lowercase hex. A token's `media` is
- * `ipfs://<CID>` (a multihash, not a bare digest) and its `media_hash` must be the SHA-256 digest
- * of the referenced bytes in **base64** — `mediaHash` is that encoding, and it is not the same
- * function as `sha256Hex`.
- *
- * Sanitization is a RENDER-time concern, not a hash-time one: the renderer treats all content as
- * untrusted and escapes at render.
+ * Content addressing: the bytes a slot points at, and the hash the chain holds.
+ * - `payload` is opaque bytes. The framework hashes bytes, so any structure
+ *   stays inside `payload` and never invalidates an existing hash.
+ * - Use sha256, not keccak. The contract stores the submitted string and
+ *   hashes its tuple for `encumbrance_hash`; `contentHashToCid` gives a
+ *   backend-free read path.
+ * - Version and `kind` live inside the object. An unknown version degrades
+ *   to `fallback`. `kind` separates text from an `ipfs://` video reference.
+ * - Use a content-only preimage: no site and no slot key.
+ * - NEP-177 uses two encodings. A slot's `page_hash` is a `String` of 64
+ *   lowercase hex characters. A token's `media` is `ipfs://<CID>`; its
+ *   `media_hash` is the SHA-256 digest in base64, written by `mediaHash`,
+ *   not `sha256Hex`.
+ * - The renderer escapes untrusted content at render time.
  */
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes as nobleHexToBytes } from '@noble/hashes/utils.js';
@@ -45,7 +29,6 @@ export const SCHEME_VERSION = 1;
 /**
  * Well-known payload kinds. `kind` is a `u8`; ids from `SITE_DEFINED_KIND_MIN` up are the site's
  * and will never be assigned a meaning here.
- *
  * `0` is deliberately not a kind: a zero byte is what an uninitialized buffer and a truncated
  * fetch both look like, and neither should decode as valid content.
  */
@@ -56,7 +39,6 @@ export const ContentKind = {
   Video: 4,
   /**
    * A body of some other kind with a destination attached — see `encodeLinked`.
-   *
    * A wrapper rather than a product type: a link is optional and can be added to any slot, and a
    * thing that can be added to anything is a decoration on content rather than a kind of it.
    */
@@ -73,7 +55,6 @@ export const HEADER_BYTES = 2;
 
 /**
  * **Enforced at encode time, so it bites before anyone signs.**
- *
  * IPFS raw blocks top out around here; past it you need chunked DAG-PB and `sha256(bytes)` stops
  * being the CID — silently breaking hash-is-the-URL for exactly the content type most likely to
  * exceed it. The cap is on the OBJECT, not the payload, because the object is what is stored and
@@ -109,7 +90,6 @@ export interface EncodedContent {
 
 /**
  * Wraps a payload in the scheme header and hashes it.
- *
  * @param kind One of `ContentKind`, or any id at or above `SITE_DEFINED_KIND_MIN`.
  */
 export function encodeContent(kind: number, payload: Uint8Array): EncodedContent {
@@ -139,7 +119,6 @@ export function encodeText(text: string): EncodedContent {
 
 /**
  * A link payload is JSON — `{"href": "…"}`, optionally with a `"label"`.
- *
  * The renderers in `@stele/react` parse JSON and read `href`/`label`, so this helper writes that
  * shape rather than a bare URL string. Scheme policy is deliberately NOT here: `javascript:` is
  * refused at RENDER, because the renderer is the security boundary and a second list of "safe"
@@ -178,9 +157,7 @@ export interface DecodedLinked {
 
 /**
  * Wraps a body of another kind with a destination.
- *
  *     payload = [innerKind:u8][hrefLen:u16 big-endian][href utf8][body…]
- *
  * Nesting is refused rather than supported: one link is a decoration, two is a malformed object,
  * and a decoder that recurses on bytes somebody else wrote is a decoder with a depth limit to argue
  * about.
@@ -215,10 +192,11 @@ export function encodeLinked(innerKind: number, href: string, body: Uint8Array):
  * Reads a `Linked` payload back. Throws on anything a renderer should treat as fallback — a
  * truncated header, a length that runs past the end, a body kind that may not be wrapped, or a
  * href that is not UTF-8.
- *
  * The length is checked against the payload it actually has rather than trusted: the bytes decide,
  * never the field claiming to describe them.
  */
+const fatalUtf8 = new TextDecoder('utf-8', { fatal: true });
+
 export function decodeLinked(payload: Uint8Array): DecodedLinked {
   const header = 1 + LINKED_HREF_LENGTH_BYTES;
   if (payload.length < header) {
@@ -244,7 +222,7 @@ export function decodeLinked(payload: Uint8Array): DecodedLinked {
   // `fatal`, so invalid UTF-8 throws instead of arriving as replacement characters in a URL.
   let href: string;
   try {
-    href = new TextDecoder('utf-8', { fatal: true }).decode(payload.subarray(header, bodyStart));
+    href = fatalUtf8.decode(payload.subarray(header, bodyStart));
   } catch {
     throw new MalformedContentError('href is not valid UTF-8');
   }
@@ -289,12 +267,10 @@ export type ContentResult =
 /**
  * The one function a renderer should call. Verify, then decode, in that order and never the other
  * way round.
- *
  * Nothing guarantees the bytes stay available: the chain will happily say a slot is owned and priced
  * while its content 404s. So every failure here is a `fallback`, and unverified bytes never reach a
  * render path — a hash mismatch is indistinguishable from an attacker substituting content, and has
  * to be treated as one.
- *
  * `unknown-version` is separated from `malformed` on purpose: it is the difference between "this
  * gateway served you garbage" and "this slot was written by someone on a newer SDK than you", and
  * only the second one is fixed by upgrading.
@@ -319,9 +295,7 @@ export function readContent(bytes: Uint8Array, expectedHash: ContentHash): Conte
   return { ok: true, ...decoded };
 }
 
-// ---------------------------------------------------------------------------
 // Hashes
-// ---------------------------------------------------------------------------
 
 const HEX_64 = /^[0-9a-f]{64}$/;
 
@@ -341,7 +315,6 @@ const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/
 
 /**
  * `sha256(bytes)` in base64 — the NEP-177 `media_hash`, required whenever `media` is set.
- *
  * Not interchangeable with `sha256Hex`: a CID is a multihash (codec and length prefix included)
  * while `media_hash` is the bare digest, and the two encodings are the two different questions the
  * two fields ask.
@@ -350,9 +323,7 @@ export function mediaHash(bytes: Uint8Array): string {
   return base64Encode(sha256(bytes));
 }
 
-// ---------------------------------------------------------------------------
 // CID — the hash IS the address
-// ---------------------------------------------------------------------------
 
 /** RFC 4648 base32, lowercase, no padding — multibase `b`. */
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -363,9 +334,12 @@ const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
  */
 const CID_PREFIX = Uint8Array.from([0x01, 0x55, 0x12, 0x20]);
 
+const BASE32_CODES = Uint8Array.from([...BASE32].map(c => c.charCodeAt(0)));
+const CID_SCRATCH = new Uint8Array(CID_PREFIX.length + 32);
+CID_SCRATCH.set(CID_PREFIX, 0);
+
 /**
  * Renders a content hash as the IPFS CIDv1 raw block that addresses the same bytes.
- *
  * This is why sha256 was chosen: a client with nothing but the on-chain hash can construct a
  * gateway URL. No storage adapter, no mapping table, no backend on the read path.
  */
@@ -374,10 +348,8 @@ export function contentHashToCid(hash: ContentHash): string {
   if (digest.length !== 32) {
     throw new MalformedContentError(`content hash must be 32 bytes, got ${digest.length}`);
   }
-  const cid = new Uint8Array(CID_PREFIX.length + 32);
-  cid.set(CID_PREFIX, 0);
-  cid.set(digest, CID_PREFIX.length);
-  return `b${base32Encode(cid)}`;
+  CID_SCRATCH.set(digest, CID_PREFIX.length);
+  return `b${base32Encode(CID_SCRATCH)}`;
 }
 
 /**
@@ -400,9 +372,7 @@ export function cidToContentHash(cid: string): ContentHash {
   return bytesToHex(bytes.subarray(CID_PREFIX.length, CID_PREFIX.length + 32));
 }
 
-// ---------------------------------------------------------------------------
 // IPFS — `media` is a URI, not a digest
-// ---------------------------------------------------------------------------
 
 /** The `media` field of a NEP-177 token: `ipfs://<CID>`. */
 export function ipfsUri(cid: string): string {
@@ -427,9 +397,7 @@ export function ipfsGatewayUrl(cid: string, gateway: string): string {
   return `${gateway.replace(/\/+$/, '')}/${cid}`;
 }
 
-// ---------------------------------------------------------------------------
 // Encoders
-// ---------------------------------------------------------------------------
 
 function base64Encode(bytes: Uint8Array): string {
   // Native TC39 method first (Node 25+, V8 13.6); `Buffer` is the Node fallback;
@@ -450,36 +418,28 @@ function base64Encode(bytes: Uint8Array): string {
 }
 
 function base32Encode(bytes: Uint8Array): string {
-  let out = '';
-  let value = 0;
-  let bits = 0;
-  for (const byte of bytes) {
-    value = (value << 8) | byte;
+  const out = new Uint8Array(Math.ceil(bytes.length * 8 / 5));
+  let n = 0, value = 0, bits = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    value = (value << 8) | bytes[i]!;
     bits += 8;
-    while (bits >= 5) {
-      out += BASE32[(value >>> (bits - 5)) & 31]!;
-      bits -= 5;
-    }
+    while (bits >= 5) { out[n++] = BASE32_CODES[(value >>> (bits - 5)) & 31]!; bits -= 5; }
   }
-  if (bits > 0) out += BASE32[(value << (5 - bits)) & 31]!;
-  return out;
+  if (bits > 0) out[n++] = BASE32_CODES[(value << (5 - bits)) & 31]!;
+  return String.fromCharCode.apply(null, out.subarray(0, n) as unknown as number[]);
 }
 
 function base32Decode(text: string): Uint8Array {
-  const out: number[] = [];
-  let value = 0;
-  let bits = 0;
+  const out = new Uint8Array(Math.floor(text.length * 5 / 8));
+  let n = 0, value = 0, bits = 0;
   for (const char of text) {
     const index = BASE32.indexOf(char);
     if (index < 0) throw new MalformedContentError(`"${char}" is not a base32 character`);
     value = (value << 5) | index;
     bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
+    if (bits >= 8) { out[n++] = (value >>> (bits - 8)) & 0xff; bits -= 8; }
   }
-  return Uint8Array.from(out);
+  return out.subarray(0, n);
 }
 
 function hexToBytes(hex: ContentHash): Uint8Array {

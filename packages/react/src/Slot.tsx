@@ -2,16 +2,13 @@
 
 /**
  * `<Slot>` — the component a builder actually writes.
- *
  *     <Slot id="hero.headline" as="h1" className="text-6xl" fallback="Ship faster." />
- *
  * **`fallback` is the most important prop in this package.** It is what renders when a slot is
  * unclaimed, and it is what makes the page look finished on day one — the difference between a
  * demo and a dead grid of empty boxes. It is also the universal failure mode: unclaimed, never
  * edited, gateway down, hash mismatch, unknown scheme version. Every one of those paints
  * `fallback`, so a page whose storage has gone entirely dark still looks like the product it is
  * pretending to be.
- *
  * **Import it as `Slot` from `@stele/react`, never as a bare default.** `slot` is crowded frontend
  * vocabulary — Web Components have a native `<slot>` element and React has an established "slots"
  * composition pattern — and a named import is how a reader tells at a glance which `Slot` is meant.
@@ -27,7 +24,6 @@ const decoder = new TextDecoder();
  * The payload structures `<Slot>` understands. These are a CLIENT convention layered on top of the
  * opaque bytes, not part of the wire format — the chain stores a hash and knows nothing about them,
  * and a site with its own structure uses `useSlot()` and renders it directly.
- *
  *   text   — UTF-8
  *   link   — JSON `{ "href": string, "label": string }`
  *   image  — the raw encoded image
@@ -36,11 +32,9 @@ const decoder = new TextDecoder();
 export interface SlotProps {
   /**
    * The slot key from the site config, e.g. `hero.headline`.
-   *
    * Named `id` because the origin's example does, and deliberately NOT forwarded to the DOM — this
    * is an on-chain identity, not an HTML id, and spreading it would silently put `hero.headline` in
    * the document's id namespace where it would collide with the page's own.
-   *
    * It IS emitted as `data-slot`, which is a namespace nothing else owns — enough for a site to
    * target slots in CSS, or to find which one an event came from, without that collision.
    */
@@ -84,11 +78,9 @@ export function Slot({ id, as, className, fallback, children }: SlotProps) {
 
 /**
  * Media renders from VERIFIED BYTES via an object URL, never from a gateway URL.
- *
  * `<img src={gatewayUrl}>` would be simpler and is wrong: the browser fetches and paints those bytes
  * without anyone checking them against the on-chain hash, so a wrong or hostile gateway substitutes
  * content silently on a page whose entire premise is that content is verifiable.
- *
  * The cost, stated plainly: no cross-page-load browser image cache and no progressive decode. That
  * is the price of "must never render unverified bytes", and the guarantee is the product.
  */

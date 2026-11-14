@@ -1,12 +1,10 @@
 //! NEP-297 events for the stele port, transcribed 1:1 from the origin
 //! Solidity event declarations.
-//!
 //! The origin emitted these as EVM logs from its site and rentals contracts
 //! (attributed to the site because the library was delegatecalled), and the
 //! escrow/factory/attestor contracts. The port keeps one catalog and one
 //! `standard = "stele"` so an indexer decodes every stele log with a single
 //! schema; `version` is per variant because a variant may evolve on its own.
-//!
 //! Payload rules:
 //! - event names and payload fields are snake_case (`SlotBought` ->
 //!   `slot_bought`, `previousOwner` -> `previous_owner`);
@@ -18,9 +16,7 @@
 //! - a timestamp field carries a `_ns` suffix because port state is
 //!   nanosecond-based, while configuration fields that the origin expressed in
 //!   seconds keep their `_secs` suffix and second units.
-//!
 //! Transcription table (origin name -> port variant, 39 rows):
-//!
 //! | # | origin file | origin event | port variant |
 //! |---|---|---|---|
 //! | 1 | origin | SlotBought | `SlotBought` |
@@ -67,21 +63,18 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::{near, AccountId};
 
 /// Every stele event, one NEP-297 `EVENT_JSON` log per emission.
-///
 /// The `#[near(event_json(standard = "stele"))]` attribute supplies the
 /// `standard` field and converts each variant identifier to snake_case for the
 /// `event` field; `#[event_version("1.0.0")]` supplies the per-variant
 /// `version`. `.emit()` comes from the generated `EventMetadata` impl.
-///
 /// The NFT standards' own events (`nft_mint`, `nft_transfer`,
 /// `nft_metadata_update`, ...) are emitted by near-sdk-contract-tools with
 /// `standard: "nep171"` / `version: "1.2.0"` and are deliberately absent here.
 #[near(event_json(standard = "stele"))]
 pub enum SteleEvent {
-    // ---------------------------------------------------------------- site
+    // Site
 
     /// Origin `SlotBought`. Every sale, claim or take.
-    ///
     /// `previous_owner` is `None` on a claim, where the origin recorded
     /// `address(0)`. `payer` is the account that funded the purchase (the
     /// predecessor), which on a routed `buy_for` is not the buyer.
@@ -235,7 +228,7 @@ pub enum SteleEvent {
         amount: U128,
     },
 
-    // ------------------------------------------------------------- rentals
+    // Rentals
 
     /// Origin `RentalListed`. The origin emitted a zero-rate record to signal
     /// a delisting; the port keeps that shape (`rate_per_day = 0`,
@@ -285,7 +278,7 @@ pub enum SteleEvent {
         expiry_ns: U64,
     },
 
-    // --------------------------------------------------------------- escrow
+    // Escrow
 
     /// Origin `Bound` (origin escrow). Durations stay in seconds, as
     /// configured.
@@ -370,7 +363,7 @@ pub enum SteleEvent {
         amount: U128,
     },
 
-    // -------------------------------------------------- escrow factory / site factory / attestor
+    // Factories / attestor
 
     /// Origin `EscrowedSiteCreated` (origin factory).
     #[event_version("1.0.0")]

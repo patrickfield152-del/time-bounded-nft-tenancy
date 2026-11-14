@@ -1,23 +1,13 @@
 /**
- * The read path — one bundle per slot. No indexer and no reader contract.
- *
- * The origin deployed a separate `SlotReader`, because a view inside a site can only read that
- * site, and its enriched per-slot fields were expensive to compose on chain. On NEAR the
- * equivalent is `slot_bundle`: one view returns the slot, quote, owner, listing and rental. A
- * twelve-slot page is then two round trips (one block for the clock, one wave of bundles), not
- * sixty.
- *
- * The buy guard comes from the same bundle. `encumbranceHash` hashes the records that the bundle
- * returned, with the contract's byte layout. The value passed to `buy` therefore cannot describe a
- * different read than the price the buyer saw.
- *
- * Tenancy liveness is computed here, not asked for. `rental_of` carries the term that the contract
- * stores. Whether it is live is `now < expiry`, and `now` is the CHAIN's clock. The same read gives
- * the unaccrued remainder that a buyer would inherit, through the parity-tested `accruedOf` twin,
- * not a second accrual formula.
- *
- * Timestamps are nanoseconds at the contract boundary. `Slot` and `Rental` keep ns; the pure math
- * in `./rentals` stays in seconds, so the conversion happens once, here.
+ * The read path: one `slot_bundle` view per slot. No indexer and no
+ * `SlotReader`. One view returns slot, quote, owner, listing and rental.
+ * - `encumbranceHash` hashes the returned records. The value passed to `buy`
+ *   cannot describe a different read than the price the buyer saw.
+ * - Tenancy liveness is computed here. `rental_of` carries the term; liveness
+ *   is `now < expiry`, with `now` from the chain clock. `accruedOf` gives the
+ *   unaccrued remainder without a second formula.
+ * - `Slot` and `Rental` keep nanoseconds. Pure math in `./rentals` uses
+ *   seconds; convert once here.
  */
 import { sha256Hex } from './content';
 import { slotKey } from './keys';
@@ -128,7 +118,6 @@ export interface RentalRecord {
 }
 
 /** The site's `slot_bundle` result, on the wire.
- *
  * Additive view: `slot`, `quote`, `owner`, `listing` and `rental` are the exact
  * shapes of their standalone methods, so a caller can compare them field for
  * field. `slot === null` is an unregistered key, not an RPC failure.
@@ -170,7 +159,6 @@ export interface TermsView {
 /**
  * A site's terms: the constants it was cloned under, its economics, and its rental and floor
  * policy.
- *
  * **Cacheable, but no longer immutable.** Before the first claim a publisher may change anything;
  * after it, take economics may only ratchet in the holder-safe direction, and rental terms stay
  * freely mutable both ways (a listing snapshots the fee, which is what makes that safe).
@@ -233,12 +221,10 @@ function writeU128BE(view: DataView, offset: number, value: bigint): void {
 /**
  * The exact preimage `encumbrance_hash` hashes on chain, and the counterpart of
  * `encumbrance_preimage` in `contracts/site/src/views.rs`.
- *
  * ```
  * [16B base_price u128][1B registered][4B len u32][lenB tenant UTF-8]
  * [8B expiry u64][16B prepaid u128][16B claimed u128]
  * ```
- *
  * The length prefix makes the variable-width account id unambiguous. Computed
  * from the same `slot_bundle` records the buy used, so the guard cannot disagree
  * with the state it was read from.
@@ -394,7 +380,6 @@ async function readSlotAt(
 
 /**
  * Reads every slot on a page, all keys in one wave.
- *
  * Takes STRING keys and returns them on each row, because the alternative — hand back rows keyed by
  * token id and make the caller re-derive the mapping — is how a render loop ends up doing the same
  * lookup on every frame. Unregistered keys come back as rows with `registered: false` rather than
@@ -418,7 +403,6 @@ export async function readSlot(reader: Reader, site: AccountId, key: string): Pr
 
 /**
  * The directory read: many sites, in parallel.
- *
  * Results come back in the order the sites were given, each already zipped against its own key
  * list. There is no cross-site call to make — NEAR has no multicall — so this is `readSlots` per
  * board issued together, which is the same wall-clock cost as the slowest board.
@@ -465,7 +449,6 @@ export async function readSiteTerms(
 
 /**
  * The subset of a site's terms the pricing twin needs, mapped without hand-copying five bps fields.
- *
  * Worth a helper rather than a spread: the fields are all `bigint`s with similar names, so
  * transposing two of them type-checks, runs, and produces a quote that is merely *wrong* — which is
  * the failure mode the whole parity layer exists to prevent one level down.
@@ -487,11 +470,9 @@ export function isTokenSettled(terms: Pick<SiteTerms, 'settlementFt'>): boolean 
 
 /**
  * The `expected_terms` argument every buy needs.
- *
  * Always read it in its own step, and pass it in. Do not compute it inline in an argument list. It
  * has to show the state the buyer saw. A fresh read at submit time would defeat the guard, because
  * it would pick up the change that the guard must reject.
- *
  * It commits to the TENANCY as well as the floor and registration. The rental tuple is what a
  * buyer inherits, so a term opened between quote and submit invalidates the deal they saw.
  */
@@ -505,9 +486,7 @@ export async function readEncumbrance(
 
 /**
  * Everything a buy needs, read against one block.
- *
  * Three bugs that this exists to prevent all look like the chain misbehaving:
- *
  * 1. A torn read. A quote from block N against terms from N+1 makes the buyer sign a state that
  *    never existed. Every view here is pinned to the clock's own block.
  * 2. Wall-clock deadlines. `buy` compares `deadline_ns` against `block_timestamp()`. A user whose
@@ -661,7 +640,6 @@ export async function readListing(
 
 /**
  * Whether an account may write this slot's content.
- *
  * Read rather than reconstructed from ownership, so the client cannot offer an edit button for a
  * transaction that will revert — and during a live tenancy the TENANT holds the content gate while
  * the owner is locked out entirely. There is one definition of who may write, and it is in the

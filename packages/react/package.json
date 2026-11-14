@@ -16,27 +16,27 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22.22.2"
+    "node": ">=26.13.1"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup src/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hot-labs/near-connect": "0.11.4",
+    "@hot-labs/near-connect": "0.12.0",
     "near-connect-hooks": "1.1.6"
   },
   "peerDependencies": {
     "@stele/sdk": "^0.1.0",
-    "react": "^19"
+    "react": "^19.3.1"
   },
   "devDependencies": {
     "@stele/sdk": "workspace:*",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "tsup": "^8",
-    "typescript": "^5"
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tsup": "9.0.0",
+    "typescript": "7.0.2"
   }
 }

@@ -1,40 +1,20 @@
 //! stele escrow vault: balance-delta booking, dark clock, and the three-phase
 //! NEP-178 surrender claim.
-//!
-//! Port of the origin escrow contract (626 lines) under the async constraint that makes
-//! this the hardest rewrite in the collection: NEAR cross-contract calls are
-//! asynchronous, so every fact the origin read from the site synchronously
-//! (`treasury`, `settlementToken`, `ownerOfOrZero`, `slotOf`) arrives in a
-//! `#[private]` callback, and no money is credited until the surrender
-//! transfer has actually succeeded.
-//!
-//! ## Booking is by balance delta
-//!
-//! `booked = balance - booked_total - pending_total - reserve`. Any value that
-//! reaches this account in the settlement asset becomes a deposit for the
-//! party that cranked the booking. One vault per site is what makes the delta
-//! unambiguous: a shared vault could not tell whose money arrived.
-//!
-//! ## Three-phase claim
-//!
-//! 1. the holder `nft_approve`s this vault (the approval id is delivered to
-//!    `nft_on_approve` and stored, because the approve call returns nothing);
-//! 2. `claim` books first (site sweep + site payout), then reads the holder
-//!    and the slot asynchronously, runs the delay / blackout / episode / cap /
-//!    `min_paid` checks and surrenders the token with the stored approval id;
-//! 3. `claim_callback` credits only if the transfer receipt succeeded.
-//!
-//! A failed receipt credits nothing. If the episode closed between the checks
-//! and the callback, the token is transferred back to the holder instead of
-//! being paid for, so a race cannot end with the vault owning a slot for free.
-//!
-//! ## Maturity is evaluated AS OF `dark_since`
-//!
-//! While dark, a deposit's clock stops: `mature` compares the booking time
-//! plus the window plus the dark seconds accrued since that booking against
-//! the moment the episode began. A deposit that matured before the lights went
-//! out stays the publisher's; one booked inside the episode can never mature
-//! while it runs.
+//! Port of the origin escrow contract (626 lines). NEAR cross-contract calls
+//! are asynchronous, so every fact the origin read synchronously (`treasury`,
+//! `settlementToken`, `ownerOfOrZero`, `slotOf`) arrives in a `#[private]`
+//! callback. Credit no money until the surrender transfer succeeds.
+//! - Booking: `booked = balance - booked_total - pending_total - reserve`.
+//!   One vault per site makes the delta unambiguous.
+//! - Three-phase claim: 1. the holder `nft_approve`s the vault, with the
+//!   approval id delivered to `nft_on_approve`; 2. `claim` books, reads the
+//!   holder and slot asynchronously, runs the delay, blackout, episode, cap
+//!   and `min_paid` checks, then surrenders the token; 3. `claim_callback`
+//!   credits only on a successful receipt. A failed receipt credits nothing,
+//!   and a token is returned to the holder if the episode closed in between.
+//! - Maturity is evaluated as of `dark_since`. While dark, `mature` compares
+//!   the booking time, the window and the dark seconds against the episode
+//!   start. A deposit booked before dark stays the publisher's.
 
 use near_sdk::borsh::BorshSerialize;
 use near_sdk::json_types::U128;

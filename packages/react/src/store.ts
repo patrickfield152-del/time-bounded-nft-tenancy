@@ -1,17 +1,14 @@
 /**
  * Fetching content bytes and proving they are the right ones.
- *
  * **The rule this file exists to enforce: unverified bytes never reach a render path.** `<Slot>`
  * must degrade to `fallback` on a fetch or hash-mismatch failure, and must never render unverified
  * bytes. That is stronger than it first sounds, and it is what rules out the obvious implementation
  * for images.
- *
  * The obvious implementation is `<img src={gatewayUrl}>`. It is wrong: the browser fetches those
  * bytes and paints them without anyone ever checking them against the on-chain hash, so a
  * compromised or merely wrong gateway substitutes content silently on a page whose whole premise is
  * that content is verifiable. So images go through the same path as everything else — fetch,
  * verify, then hand the render layer bytes it can trust.
- *
  * The cost is real and worth stating: no browser image cache across page loads, no progressive
  * decode, and a blob URL per image that has to be revoked. That is the price of the guarantee.
  */
@@ -68,7 +65,6 @@ export async function fetchAndVerify(
  * Content is immutable under its hash, so it is cached by hash forever and never invalidated. An
  * edit produces a NEW hash, which is a cache miss by construction — there is no staleness to manage
  * and no revalidation to get wrong.
- *
  * In-flight requests are deduped through the same map, so twelve slots sharing one headline issue
  * one fetch.
  */

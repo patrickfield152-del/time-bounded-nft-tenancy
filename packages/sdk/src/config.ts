@@ -1,17 +1,11 @@
 /**
- * A site's configuration, and where its addresses come from.
- *
- * **Accounts come from the environment, never from this file.** There is no chain list and no
- * deployed-address table: `readNetwork()` reads `NEAR_RPC_URL` and the four accounts of the
- * deployment plan, so the same build points at testnet, mainnet or a local sandbox without a
- * version bump. A missing variable throws `MissingEnvError` naming itself — a typo in
- * `NEAR_SITE_ACCOUNT` otherwise arrives as `AccountDoesNotExist` from a node, which reads like a
- * deployment failure rather than a configuration one.
- *
- * The `SiteConfig` half is client-side only: names, kinds and floors that a renderer and a deploy
- * call need. **It is deliberately data, not functions** — it crosses the server/client boundary in
- * a Next app, and a function there is an error rather than a prop. The content gateway is a
- * template string for the same reason.
+ * A site's configuration and where its addresses come from.
+ * - Accounts come from the environment. `readNetwork()` reads `NEAR_RPC_URL`
+ *   and the deployment accounts. One build points at any network.
+ * - A missing variable throws `MissingEnvError`. A typo in
+ *   `NEAR_SITE_ACCOUNT` otherwise arrives as `AccountDoesNotExist` from a node.
+ * - `SiteConfig` is client-side data, not functions. It crosses the
+ *   server/client boundary in a Next app.
  */
 import { ContentKind } from './content';
 import { slotKeys } from './keys';
@@ -27,7 +21,6 @@ import { parseUnits, toU128, type U128 } from './settlement';
 
 /**
  * Decimals a floor string is parsed against when the config does not say otherwise.
- *
  * 24 is native NEAR's yocto count. A 6-decimal settlement token is the common demo case, and
  * parsing a floor for it against 24 would be off by 18 orders of magnitude — which is why
  * `parseFloor` takes the decimals explicitly and `defineSite` carries them through.
@@ -55,7 +48,6 @@ export const CONTENT_KIND_BY_NAME: Record<SlotKindName, number> = {
 
 /**
  * Default gateway: a per-CID subdomain, so the CID is the whole address.
- *
  * A template rather than a function because a site config crosses the server/client boundary in a
  * Next app, and functions do not. `{cid}` is replaced; a template without it is treated as a base
  * URL and joined.
@@ -125,7 +117,6 @@ export interface SiteConfig {
 
 /**
  * Validates a site config and normalizes it into the shape every consumer wants.
- *
  * Every bad key is reported at once rather than on the first throw: a config with three typos
  * should cost one edit, not three build cycles.
  */
@@ -190,7 +181,6 @@ export interface SteleNetwork {
 
 /**
  * The deployment, from the environment.
- *
  * `NEAR_FT_ACCOUNT` is optional and its absence means native settlement: a site with a token is a
  * different deployment plan, not a different build.
  */

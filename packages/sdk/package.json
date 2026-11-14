@@ -16,10 +16,10 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22.22.2"
+    "node": ">=26.13.1"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
@@ -28,10 +28,10 @@
     "near-api-js": "7.5.3"
   },
   "devDependencies": {
-    "@types/node": "^22",
-    "tsup": "^8",
-    "tsx": "^4",
-    "typescript": "^5",
-    "vitest": "4.1.10"
+    "@types/node": "26.6.6",
+    "tsup": "9.0.0",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
   }
 }

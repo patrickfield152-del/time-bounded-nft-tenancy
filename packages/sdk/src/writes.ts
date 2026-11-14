@@ -1,27 +1,15 @@
 /**
- * Transaction builders — the write half of the SDK.
- *
- * Every function here returns a `CallRequest`. It does not send. The SDK does not own a wallet,
- * does not pick a nonce, and does not decide when to submit. The app or the script does that.
- * `submit` from `./near` is the script path. `toWalletCall` is the browser path.
- *
- * These builders do not guess two values.
- *
- * `expectedTerms`: required on every buy. No bypass value exists. It has to show the state the
- * buyer saw. A builder that read it again at submit time would defeat the guard, because it would
- * pick up the change that the guard must reject. Read it with `readBuyContext` (or
- * `readEncumbrance`) in its own step, and pass it in.
- *
- * `settlementFt`: required on every builder that moves money. The two settlement paths are not
- * interchangeable. A native call to a token site reverts and sends nothing. A token call to a
- * native site is a transfer to an account that is not a token. Pass `readSiteTerms().settlementFt`
- * through. There is no default, because a default is wrong for one kind of site.
- *
- * The token path is `ft_transfer_call`, not an approval. NEP-141 has no allowance to set. The
- * buyer calls the token once, with the cost as the amount and a JSON `msg`. The site's
- * `ft_on_transfer` dispatches on `action`. The site sees `sender_id` as the payer. This is why
- * `buy_for` exists only on the native path: the FT message has no recipient field, and an invented
- * one would be a message the contract does not read.
+ * Transaction builders: the write half of the SDK.
+ * - Every function returns a `CallRequest`. It does not send. `submit` from
+ *   `./near` is the script path; `toWalletCall` is the browser path.
+ * - `expectedTerms` is required on every buy. Read it with `readBuyContext`
+ *   or `readEncumbrance` in its own step, then pass it in.
+ * - `settlementFt` is required on every builder that moves money. Pass
+ *   `readSiteTerms().settlementFt`. There is no default.
+ * - The token path is `ft_transfer_call`, not an approval. NEP-141 has no
+ *   allowance. The buyer calls the token once with a JSON `msg`. The site's
+ *   `ft_on_transfer` dispatches on `action` and sees `sender_id` as payer.
+ *   `buy_for` exists only on the native path.
  */
 import { assertContentHash } from './content';
 import { jsonU64, NS_PER_SECOND } from './wire';
@@ -40,7 +28,6 @@ export const DEFAULT_DEADLINE_SECS = 300n;
 /**
  * Slippage headroom applied to the quoted price when the caller does not supply an explicit
  * `max_price`.
- *
  * Zero would be correct and unusable: the quote is read a block or two before the transaction
  * lands, and any reversion boundary crossed in between changes the number. 1% is enough to absorb
  * ordinary drift and far too little to absorb a take, which costs at least 1.4x.
@@ -69,7 +56,6 @@ function toU64(value: bigint | number, field: string): number {
 
 /**
  * A nanosecond timestamp as the JSON number `deadline_ns` expects.
- *
  * Current epoch nanoseconds exceed `Number.MAX_SAFE_INTEGER`, so the value carries up to ~256 ns of
  * double rounding. That is stated rather than hidden: a deadline is compared against a block
  * timestamp and is minutes away, so 256 ns is eight orders of magnitude below anything that could
@@ -142,9 +128,7 @@ function ftCall(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Buy
-// ---------------------------------------------------------------------------
 
 export interface BuildBuyOptions {
   site: AccountId;
@@ -152,7 +136,6 @@ export interface BuildBuyOptions {
   tokenId: string;
   /**
    * What the caller was quoted — `SlotState.charged`, from the site's own `quote`.
-   *
    * **Not `netCost`.** The contract charges the gross price; the inherited rent arrives separately
    * as it accrues. Quoting the net figure here underfunds the call and reverts.
    */
@@ -181,7 +164,6 @@ export interface BuildBuyOptions {
    * funded. The site routes it into the generated `storage_deposit` before minting; a fresh account
    * cannot be minted to without it, so a first purchase into a new wallet attaches
    * `max_price + storageTopUp` and gets the change back.
-   *
    * A fresh recipient needs `MIN_STORAGE_TOP_UP` (0.007 NEAR, the site's storage bounds minimum);
    * an existing holder who already covers the token's bytes needs nothing. Read
    * `storage_balance_bounds` and `storage_balance_of` rather than guessing, because zero is right
@@ -193,7 +175,6 @@ export interface BuildBuyOptions {
 
 /**
  * Builds a `buy` or a `buy_for`.
- *
  * `buy_for` exists because `owner = predecessor` has already killed one implementation in the
  * origin's sibling repo, and it unlocks sponsored purchases, gifting and a cross-site router. On the
  * native path the payer attaches `max_price`; the contract refunds the difference to whoever paid,
@@ -264,7 +245,6 @@ export function buildBuyFor(options: BuildBuyOptions & { recipient: AccountId })
 /**
  * The path to reach for. Takes a `BuyContext` — quote, encumbrance and chain clock all read at one
  * pinned block — so the ways a buy can be built wrong are unavailable by construction.
- *
  * @example
  * const terms = await readSiteTerms(reader, site);
  * const context = await readBuyContext(reader, site, 'hero.headline');
@@ -290,18 +270,14 @@ export function buildBuyFrom(
   });
 }
 
-// ---------------------------------------------------------------------------
 // Content
-// ---------------------------------------------------------------------------
 
 /**
  * Writes a slot's content hash. The bytes have to be stored somewhere retrievable by hash BEFORE
  * this lands: a hash on-chain whose bytes were never uploaded is a permanently blank slot that
  * looks exactly like a bug in the SDK.
- *
  * During a live tenancy the TENANT is the only account this succeeds for; the owner is locked out
  * entirely. Check with `readCanEdit` rather than inferring from ownership.
- *
  * **Non-payable, deliberately**: a function-call key cannot attach a deposit, and `edit` is the one
  * method a tenant's session key is allowed to call.
  */
@@ -332,13 +308,10 @@ export function buildSetEditor(options: {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Rentals
-// ---------------------------------------------------------------------------
 
 /**
  * Lists a position for rent. Owner only.
- *
  * `ratePerDay` is per DAY and `maxDurationSecs` is in SECONDS: seconds make the fast-rotation
  * regime expressible at all, while a per-second rate would truncate to zero for any cheap position.
  * A sale clears the listing but NOT an active tenancy — the new owner should not be renting out at
@@ -370,7 +343,6 @@ export interface BuildRentOptions {
   durationSecs: bigint | number;
   /**
    * The rate the tenant was shown, from `readListing().ratePerDay`.
-   *
    * Required and exact — the contract reverts on any mismatch. This is the rental path's
    * `max_price`: without it an owner front-runs a rental by raising the rate between quote and
    * transaction.
@@ -408,7 +380,6 @@ export function buildRent(options: BuildRentOptions): CallRequest {
 
 /**
  * Extends a live tenancy. Current tenant only, and the term must not have lapsed.
- *
  * Three rules that surprise people: the cap applies to the REMAINING window rather than the total,
  * so no buyer inherits more than `maxRentalTermSecs` however many extensions preceded them; the
  * rate charged is the CURRENT listing's, not the one originally paid; and the unearned remainder of
@@ -451,7 +422,6 @@ export function buildClaimRent(options: { site: AccountId; tokenId: string }): C
 /**
  * Clears a lapsed tenancy and restores the owner's content hash. Permissionless once the term has
  * expired.
- *
  * **Load-bearing for the mechanism, not just tidiness.** `rent` refuses to open against a
  * lapsed-but-uncleared term, so until someone calls this the position has left the rental market
  * entirely — for everyone, indefinitely — and the expired tenant's content is still on the page.
@@ -465,9 +435,7 @@ export function buildEndRental(options: { site: AccountId; tokenId: string }): C
   };
 }
 
-// ---------------------------------------------------------------------------
 // Ledger
-// ---------------------------------------------------------------------------
 
 /**
  * Pays an account what the site owes it from the pull ledger. Permissionless: the money can only
@@ -495,9 +463,7 @@ export function buildSweepTreasury(options: { site: AccountId }): CallRequest {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Site creation
-// ---------------------------------------------------------------------------
 
 /**
  * The take economics a site starts with. Mutable before the first claim and a one-way ratchet after
@@ -539,7 +505,6 @@ export interface SiteFloorPolicyConfig {
 /**
  * The `SiteConfig` struct a site is initialized with — exactly the eleven fields the contract
  * holds, nothing else.
- *
  * Names, symbols and base URIs are NOT here: `new` sets `ContractMetadata` itself, and only
  * `set_base_uri` can change any of it afterwards. Open registration and the default floor are not
  * init arguments either — a site starts closed with `default_floor = min_slot_floor` — and the
@@ -600,7 +565,6 @@ const ONE_YEAR = 31_536_000n;
  * The clamps below duplicate the contract on purpose. This is the one place in the SDK where
  * duplicating a contract rule is right. The contract's version is the authority, and it reverts.
  * But a revert here costs a deploy transaction and returns an error name, not a sentence.
- *
  * The protocol legs are NOT checked. They are the factory's state, supplied by its own `new`. A
  * client that invented them would validate against numbers that the deployment never agreed to.
  * `take_bps > payout_bps + protocol_bps` is therefore enforced where it can be: on chain.
@@ -666,11 +630,9 @@ export function siteConfigOf(options: SiteConfigOptions): {
 
 /**
  * Builds `create_site` or `create_site_for`.
- *
  * The factory creates the account, deploys the site wasm and calls `new` in one batch; the deposit
  * must cover the account's state and its code storage, which is why it is a required argument read
  * from the factory rather than a constant here.
- *
  * Two settings a deployment wants are deliberately absent: `new` starts a site closed, with
  * `default_floor = min_slot_floor` and a zero display royalty. Open registration, the default floor
  * and the royalty are owner calls on the created site (`set_open_registration`,

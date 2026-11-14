@@ -1,20 +1,14 @@
 /**
- * What a site's money is, and how a money value crosses the wire.
- *
- * Every amount on the wire is a decimal string. `u128` in JSON is a string type (`U128`) or a
- * number. near-sdk's `U128` is the string form, for this reason: 10^24 yocto per NEAR puts normal
- * amounts past `Number.MAX_SAFE_INTEGER`, and a JavaScript number rounds them in silence.
- * `toU128`/`fromU128` are the only conversions. They are strict: a negative, a fraction, or an
- * out-of-range value throws. It does not become a plausible wrong number.
- *
- * Native NEAR has 24 decimals. A floor written for a 6-decimal mock FT means something different
- * by 18 orders of magnitude. Nothing here guesses: `readSettlementAsset` reads `ft_metadata` for a
- * token site and returns the fixed native description otherwise. Callers format with the decimals
- * they got back.
- *
- * There is no chain list and no deployed-token table. The settlement account comes from the site's
- * own `terms()` read or from `NEAR_FT_ACCOUNT`. A testnet deployment and a local sandbox are the
- * same code path.
+ * What a site's money is, and how an amount crosses the wire.
+ * - Wire amounts are decimal strings. `u128` in JSON is a string type
+ *   (`U128`) or a number. 10^24 yocto per NEAR exceeds
+ *   `Number.MAX_SAFE_INTEGER`; a JavaScript number rounds in silence.
+ * - `toU128` and `fromU128` are the only conversions. They throw on a
+ *   negative, a fraction, or an out-of-range value.
+ * - Native NEAR has 24 decimals; a 6-decimal mock FT differs by 18 orders of
+ *   magnitude. `readSettlementAsset` reads `ft_metadata` for a token site and
+ *   returns the fixed native description otherwise.
+ * - The settlement account comes from `terms()` or `NEAR_FT_ACCOUNT`.
  */
 import { readView, type AccountId, type Reader } from './near';
 import { nearToYocto } from 'near-api-js';
@@ -36,7 +30,6 @@ const DECIMAL_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?$/;
 
 /**
  * Narrows a value to `U128`.
- *
  * `number` is accepted only as an integer, because `0.1` has no exact `bigint` and a fractional
  * amount is always a units mistake rather than a rounding preference.
  */
@@ -70,7 +63,6 @@ export function fromU128(value: U128): bigint {
 
 /**
  * A human decimal amount into integer base units, exactly.
- *
  * `parseUnits('1.5', 6)` is `1_500_000n`. Never multiplies by a float: the whole point of the
  * strict pattern is that `0.29 * 1e18` is not `290000000000000000` in JavaScript.
  */
@@ -112,7 +104,6 @@ export function formatUnits(value: bigint, decimals: number): string {
 
 /**
  * NEP-145 `storage_balance_bounds().min` on a site: 0.007 NEAR.
- *
  * A mint into a fresh account has to fund at least this much, and a native buy attaches it as a
  * top-up that the site routes into its own generated `storage_deposit` before minting. Only a first
  * purchase into an unfunded wallet needs it; the contract refunds what it does not use to the
@@ -144,7 +135,6 @@ interface FtMetadataView {
 
 /**
  * The asset a site's prices are denominated in.
- *
  * For a token site this is one `ft_metadata` call — the only way to know a token's decimals, and
  * the reason `min_slot_floor` is supplied at deploy time rather than discovered: `new` cannot await
  * an asynchronous read. For native settlement it is the constant, with no round trip.

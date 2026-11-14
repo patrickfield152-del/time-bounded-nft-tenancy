@@ -5,12 +5,12 @@ members = ["contracts/site", "contracts/factory", "contracts/escrow", "contracts
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.100"
 license = "MIT"
 publish = false
 
 [workspace.dependencies]
-near-sdk = "=5.30.1"
+near-sdk = "=5.30.2"
 near-sdk-contract-tools = "=4.0.0"
 # fixed-hash's `std` feature pulls `rand` -> `getrandom`, which refuses
 # wasm32-unknown-unknown; U256 arithmetic is core-only, so no std here.

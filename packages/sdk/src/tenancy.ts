@@ -1,34 +1,20 @@
 /**
- * Time-bounded tenancy: the session key that a tenant uses to write content without a wallet
- * prompt.
- *
- * The mechanism, end to end:
- *
- *   1. The tenant calls `rent(token_id, duration_secs, expected_rate_per_day)` and pays for the
- *      term.
- *   2. They generate a fresh key pair HERE, and add it to their own account as a function-call key.
- *      The key allows only `receiver_id = the site` and `method_names = ["edit"]`, funded with a
- *      gas-only allowance.
- *   3. Every `edit` in the term is signed by that key: no extension, no prompt, no wallet in the
- *      loop. The site still checks `predecessor == tenant` and `block_timestamp() <
- *      tenant_expires` on every call, because the key cannot enforce either.
- *   4. At `end_rental` — or whenever the tenant wants out — the key is deleted.
- *
- * A function-call key has no expiry field. It has a receiver, a method list and an allowance, and
- * none of them is time. The contract enforces the term; it is the only authority. This is also why
- * NEP-366 meta-transactions are safe here: a relayer does not check the allowance, so a design that
- * relied on the key running dry would rely on billing, not on time.
- *
- * The allowance is 0.25 NEAR, the default that a wallet sign-in grants, sized for a term of
- * ordinary editing. An allowance is a gas budget, not a balance that the tenant loses. Unused
- * yocto returns to the account when the key is deleted. When it runs out, the key stops working —
- * it does not fail a call that an owner key would allow, because `edit` is the only method it may
- * call.
- *
- * Deletion costs one transaction, signed by a full-access key (the wallet), and it cannot attach a
- * deposit — which is also why `edit` itself must be non-payable. A tenant who never deletes the key
- * has not granted anyone anything: the key sits in their own account, and the site's term check has
- * already expired.
+ * Time-bounded tenancy: a session key lets a tenant write content without a
+ * wallet prompt.
+ * 1. The tenant calls `rent(token_id, duration_secs, expected_rate_per_day)`.
+ * 2. A fresh key pair is generated here and added as a function-call key.
+ *    It allows only `receiver_id = the site` and
+ *    `method_names = ["edit"]`, with a gas-only allowance.
+ * 3. Every `edit` in the term uses that key. The site still checks
+ *    `predecessor == tenant` and the term on every call.
+ * 4. At `end_rental` the key is deleted.
+ * - A function-call key has no expiry field. The contract enforces the term.
+ * - NEP-366 meta-transactions are safe here: a relayer does not check the
+ *   allowance, so the key running dry is billing, not time.
+ * - The allowance is 0.25 NEAR. It is a gas budget, not a balance. Unused
+ *   yocto returns when the key is deleted.
+ * - Deletion costs one transaction signed by a full-access key. `edit` must
+ *   be non-payable because that transaction attaches no deposit.
  */
 import { Account, KeyPair } from 'near-api-js';
 import type { AccountId } from './near';
@@ -55,7 +41,6 @@ export interface SessionKey {
 
 /**
  * A fresh ed25519 key pair.
- *
  * Generated client-side and never transmitted: the private half exists only in this object (and in
  * whatever the caller persists it in). Nothing in this package stores it.
  */
@@ -75,10 +60,8 @@ export interface IssueSessionKeyOptions {
 
 /**
  * Adds a session key to the tenant's account.
- *
  * @param tenant A signing account for the tenant — the wallet, or an `Account` built from their
  *   key. The transaction is an ordinary `AddKey` and costs the tenant gas.
- *
  * The returned `SessionKey` is the caller's to keep: sign edits with `sessionAccount`, and delete it
  * with `revokeSessionKey` at the end of the term.
  */
@@ -98,7 +81,6 @@ export async function issueSessionKey(
 
 /**
  * Deletes a session key from the tenant's account.
- *
  * `deleteKey` needs a full-access signature, so this is the wallet's transaction, not the session
  * key's. Call it when the term ends (or is ended early); a forgotten key cannot outlive the term,
  * because the site's `edit` rejects any call past `tenant_expires`.
@@ -109,7 +91,6 @@ export async function revokeSessionKey(tenant: Account, publicKey: string): Prom
 
 /**
  * An `Account` that signs as the tenant with the session key — the shape `submit` takes.
- *
  * Use it for `edit` only: the key's permission is the site's `edit` method, so anything else is
  * rejected by the protocol before the contract runs.
  */

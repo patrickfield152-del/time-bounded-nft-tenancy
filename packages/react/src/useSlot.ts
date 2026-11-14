@@ -4,7 +4,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { SlotDefinition, SlotState } from '@stele/sdk';
 
 import { useStele } from './context';
-import type { ContentStatus } from './content-store';
+import type { ContentStatus } from './store';
 
 export interface UseSlotResult {
   /** The config entry — kind and configured floor. */

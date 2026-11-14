@@ -13,5 +13,7 @@ broadcast/
 *.wasm
 wave*.log
 wave*.exit
+.claude/
+apps/demo/next-env.d.ts
 # Resolved on the build box; the pinned direct versions are the contract.
 Cargo.lock
