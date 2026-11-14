@@ -1,38 +1,23 @@
-//! stele escrow vault: balance-delta booking, dark clock, and the three-phase
-//! NEP-178 surrender claim.
-//! Port of the origin escrow contract (626 lines). NEAR cross-contract calls
-//! are asynchronous, so every fact the origin read synchronously (`treasury`,
-//! `settlementToken`, `ownerOfOrZero`, `slotOf`) arrives in a `#[private]`
-//! callback. Credit no money until the surrender transfer succeeds.
-//! - Booking: `booked = balance - booked_total - pending_total - reserve`.
-//!   One vault per site makes the delta unambiguous.
-//! - Three-phase claim: 1. the holder `nft_approve`s the vault, with the
-//!   approval id delivered to `nft_on_approve`; 2. `claim` books, reads the
-//!   holder and slot asynchronously, runs the delay, blackout, episode, cap
-//!   and `min_paid` checks, then surrenders the token; 3. `claim_callback`
-//!   credits only on a successful receipt. A failed receipt credits nothing,
-//!   and a token is returned to the holder if the episode closed in between.
-//! - Maturity is evaluated as of `dark_since`. While dark, `mature` compares
-//!   the booking time, the window and the dark seconds against the episode
-//!   start. A deposit booked before dark stays the publisher's.
+//! stele escrow vault: balance-delta booking, dark clock, and 3-phase NEP-178 surrender claim (2 receipts/phases).
+//! Port of the origin escrow contract (626 lines); `#[private]` callbacks carry async site reads (`treasury`, `settlementToken`, `ownerOfOrZero`, `slotOf`, `ft_balance_of`, `treasury_balance`, `pending_withdrawals`).
+//! - Booking (`_book`, `_book()`): `booked = balance - booked_total - pending_total - reserve` (one vault per `site`, crediting `site.owner()` from `create_escrowed_site`).
+//! - Claim (`min_paid`): `nft_approve` delivers `approval_id` to `nft_on_approve`; `claim` books and runs async checks then surrenders; `claim_callback` credits on success or returns the token if closed.
+//! - Maturity (`mature`, `_mature`): evaluates as of `dark_since` (deposits before dark remain the publisher's).
 
 use near_sdk::borsh::BorshSerialize;
 use near_sdk::json_types::U128;
 use near_sdk::store::{LookupMap, Vector};
 use near_sdk::utils::assert_one_yocto;
 use near_sdk::{
-    env, near, require, serde_json, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault,
-    Promise, PromiseError, PromiseOrValue,
+    AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseError,
+    PromiseOrValue, env, near, require, serde_json,
 };
 
 pub type TokenId = String;
 
-/// Nanoseconds per second: configuration stays in seconds, state keeps
-/// nanoseconds, and every comparison converts here.
+/// Nanoseconds per second; config uses seconds, state uses nanoseconds.
 pub const NS_PER_SEC: u64 = 1_000_000_000;
-/// The account id the factory uses for the native settlement branch; here it
-/// is only the sentinel `sweep_foreign` understands for native value on an
-/// FT-settled vault.
+/// Sentinel `sweep_foreign` key for native value on an FT-settled vault.
 pub const NATIVE_TOKEN_KEY: &str = "near";
 
 /// Factory-supplied vault parameters, immutable after `bind`.
@@ -45,8 +30,7 @@ pub struct EscrowParams {
     pub min_booking: U128,
 }
 
-/// One booked value arrival. `dark_at_booking` freezes maturity as of the
-/// booking moment, mirroring `_mature` evaluated AS OF `dark_since`.
+/// Booked arrival; `dark_at_booking` freezes maturity at booking time (`dark_since`).
 #[near(serializers = [json, borsh])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Deposit {
@@ -56,8 +40,7 @@ pub struct Deposit {
     pub beneficiary: AccountId,
 }
 
-/// The subset of the site's `terms()` this vault verifies at bind. Unknown
-/// fields are ignored by serde, so the full terms view stays the site's.
+/// Subset of site `terms()` verified at bind; serde ignores other fields.
 #[near(serializers = [json])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SiteTerms {
@@ -74,9 +57,7 @@ pub struct SlotState {
     pub last_purchase_at_ns: u64,
 }
 
-/// A `bind` that has not passed the site's pin read yet. Parameters are
-/// committed only after the read succeeds, so a failed pin check leaves an
-/// unbound vault rather than a bound-to-nothing one.
+/// Uncommitted `bind` awaiting site pin check.
 #[near(serializers = [borsh])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingBind {
@@ -84,9 +65,7 @@ pub struct PendingBind {
     pub params: EscrowParams,
 }
 
-/// A claim that has booked and is walking the asynchronous checks. One slot:
-/// a second `claim` is refused until the first resolves, which is what keeps
-/// the immature pool stable between the check phase and the credit.
+/// Active single-slot claim; blocks concurrent `claim` until resolved.
 #[near(serializers = [json, borsh])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClaimPlan {
@@ -124,23 +103,18 @@ pub struct Contract {
     pub pending_total: U128,
     pub reserve: U128,
     pub pending: LookupMap<AccountId, U128>,
-    /// `token_id` -> the `dark_since` it last claimed against. One entry per
-    /// token, overwritten on the next episode: constant size, no per-episode
-    /// growth.
+    /// `token_id` -> last `dark_since` claimed (constant size, overwritten next episode).
     pub claimed_epoch: LookupMap<TokenId, u64>,
     /// `(token_id, owner)` -> approval id captured by `nft_on_approve`.
     pub approvals: LookupMap<(TokenId, AccountId), u64>,
     pub deposits: Vector<Deposit>,
     pub head: u64,
-    /// Last observed settlement-FT balance, so `unbooked()` can answer for an
-    /// FT vault without a cross-contract read.
+    /// Cached FT balance for `unbooked()`.
     pub ft_balance_cache: U128,
     pub pending_bind: Option<PendingBind>,
-    /// The beneficiary captured when a booking started (predecessor of
-    /// `book`, or the signer of the `bind` chain).
+    /// Booking beneficiary (`book` predecessor or `bind` signer).
     pub pending_beneficiary: AccountId,
-    /// The publisher (site owner) captured at bind. Bookings pay this account,
-    /// never the crank caller: origin `_book` stamps `site.owner()`.
+    /// Publisher cached at bind; bookings credit this account.
     pub site_owner_cache: Option<AccountId>,
     pub pending_claim: Option<ClaimPlan>,
 }
@@ -176,19 +150,16 @@ impl Contract {
         }
     }
 
-    /// Factory-only. Stores the proposal, then reads the site's terms to prove
-    /// the pin in the site -> vault direction (`treasury == this vault`); the
-    /// vault -> site direction is the stored `site`. Nothing is committed
-    /// until both sides agree.
+    /// Factory-only: stores proposal and verifies site `treasury == this vault`.
     #[payable]
     pub fn bind(&mut self, site: AccountId, params: EscrowParams) -> Promise {
-        require!(
-            env::predecessor_account_id() == self.factory,
-            "NotFactory"
-        );
+        require!(env::predecessor_account_id() == self.factory, "NotFactory");
         require!(self.site.is_none(), "AlreadyBound");
         require!(params.window_secs != 0, "InvalidParams");
-        self.pending_bind = Some(PendingBind { site: site.clone(), params });
+        self.pending_bind = Some(PendingBind {
+            site: site.clone(),
+            params,
+        });
         Promise::new(site)
             .function_call(
                 "terms".to_owned(),
@@ -196,32 +167,25 @@ impl Contract {
                 NearToken::from_yoctonear(0),
                 Gas::from_tgas(15),
             )
-            .then(
-                Promise::new(env::current_account_id()).function_call(
-                    "bind_callback".to_owned(),
-                    b"{}".to_vec(),
-                    NearToken::from_yoctonear(0),
-                    Gas::from_tgas(20),
-                ),
-            )
+            .then(Promise::new(env::current_account_id()).function_call(
+                "bind_callback".to_owned(),
+                b"{}".to_vec(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(20),
+            ))
     }
 
-    /// Permissionless crank: ask the site to empty both legs that owe this
-    /// vault, then book the balance delta. The deposit is credited to the site
-    /// owner captured at bind, so a third-party crank cannot capture revenue;
-    /// it only pays the gas.
+    /// Permissionless crank: sweeps site owed legs to `site_owner_cache` and books delta.
     pub fn book(&mut self) -> Promise {
         self.assert_bound();
         let beneficiary = self
             .site_owner_cache
             .clone()
-            .unwrap_or_else(|| env::predecessor_account_id());
+            .unwrap_or_else(env::predecessor_account_id);
         self.book_inner(beneficiary)
     }
 
-    /// Private tail of `bind`: commit the parameters, then book the vault's
-    /// initial sweep under the transaction signer's name (the publisher who
-    /// signed `create_escrowed_site`).
+    /// Private tail of `bind`: commits params and books initial sweep.
     #[private]
     pub fn bind_callback(&mut self, #[callback_result] terms: Result<SiteTerms, PromiseError>) {
         let pending = self
@@ -252,19 +216,16 @@ impl Contract {
                 NearToken::from_yoctonear(0),
                 Gas::from_tgas(10),
             )
-            .then(
-                Promise::new(env::current_account_id()).function_call(
-                    "bind_owner_callback".to_owned(),
-                    b"{}".to_vec(),
-                    NearToken::from_yoctonear(0),
-                    Gas::from_tgas(25),
-                ),
-            )
+            .then(Promise::new(env::current_account_id()).function_call(
+                "bind_owner_callback".to_owned(),
+                b"{}".to_vec(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(25),
+            ))
             .detach();
     }
 
-    /// Private tail of `bind`: caches the publisher and books the initial
-    /// sweep under their name.
+    /// Private tail of `bind`: caches publisher and books initial sweep.
     #[private]
     pub fn bind_owner_callback(
         &mut self,
@@ -274,13 +235,11 @@ impl Contract {
         let beneficiary = self
             .site_owner_cache
             .clone()
-            .unwrap_or_else(|| env::signer_account_id());
+            .unwrap_or_else(env::signer_account_id);
         self.book_inner(beneficiary).detach();
     }
 
-    /// Private stage between the two site calls. The site panics on a pull it
-    /// does not owe (`NothingToWithdraw`), so each leg runs in its own receipt
-    /// and a failure is tolerated instead of aborting the booking.
+    /// Private step between site pulls (`NothingToWithdraw` panics are isolated).
     #[private]
     pub fn book_step_callback(&mut self) {
         let site = self
@@ -296,25 +255,21 @@ impl Contract {
                 NearToken::from_yoctonear(0),
                 Gas::from_tgas(20),
             )
-            .then(
-                Promise::new(env::current_account_id()).function_call(
-                    "book_callback".to_owned(),
-                    b"{}".to_vec(),
-                    NearToken::from_yoctonear(0),
-                    Gas::from_tgas(20),
-                ),
-            )
+            .then(Promise::new(env::current_account_id()).function_call(
+                "book_callback".to_owned(),
+                b"{}".to_vec(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(20),
+            ))
             .detach();
     }
 
-    /// Private booking phase. The native branch reads the free balance
-    /// directly; the FT branch must ask the token for `ft_balance_of(self)` in
-    /// another receipt.
+    /// Private booking phase: reads native free balance or queries FT `ft_balance_of(self)`.
     #[private]
     pub fn book_callback(&mut self) {
         match self.settlement_ft.clone() {
             None => {
-                let balance = self.native_free_balance();
+                let balance = self.free_near();
                 self.finish_booking(balance);
             }
             Some(token) => {
@@ -327,14 +282,12 @@ impl Contract {
                         NearToken::from_yoctonear(0),
                         Gas::from_tgas(15),
                     )
-                    .then(
-                        Promise::new(env::current_account_id()).function_call(
-                            "book_ft_callback".to_owned(),
-                            b"{}".to_vec(),
-                            NearToken::from_yoctonear(0),
-                            Gas::from_tgas(20),
-                        ),
-                    )
+                    .then(Promise::new(env::current_account_id()).function_call(
+                        "book_ft_callback".to_owned(),
+                        b"{}".to_vec(),
+                        NearToken::from_yoctonear(0),
+                        Gas::from_tgas(20),
+                    ))
                     .detach();
             }
         }
@@ -349,9 +302,7 @@ impl Contract {
         self.finish_booking(balance);
     }
 
-    /// NEP-141 entry. `{"book": "<beneficiary>"}` books the arriving value;
-    /// `{"reserve": true}` funds the claim reserve. Anything else is refused
-    /// by returning the amount, which the FT refunds to the sender.
+    /// NEP-141 entry: `{"book": "<beneficiary>"}` or `{"reserve": true}`; other msgs refund.
     pub fn ft_on_transfer(
         &mut self,
         sender_id: AccountId,
@@ -398,9 +349,7 @@ impl Contract {
         PromiseOrValue::Value(amount)
     }
 
-    /// NEP-178 approval delivery. The approve call returns nothing, so this is
-    /// the only place the approval id exists; it is keyed by `(token, owner)`
-    /// because a standing approval is not caller consent for a surrender.
+    /// NEP-178 approval delivery keyed by `(token, owner)`.
     pub fn nft_on_approve(
         &mut self,
         token_id: TokenId,
@@ -409,16 +358,11 @@ impl Contract {
         msg: String,
     ) {
         let _ = msg;
-        require!(
-            Some(env::predecessor_account_id()) == self.site,
-            "OnlySite"
-        );
-        self.approvals
-            .insert((token_id, owner_id), approval_id);
+        require!(Some(env::predecessor_account_id()) == self.site, "OnlySite");
+        self.approvals.insert((token_id, owner_id), approval_id);
     }
 
-    /// Credits a mature deposit to its beneficiary. Permissionless: it pays a
-    /// recorded party, never the caller.
+    /// Permissionless: credits a mature deposit to its beneficiary.
     pub fn release(&mut self, deposit_id: u64) {
         self.assert_bound();
         let index = u32::try_from(deposit_id).unwrap_or_else(|_| env::panic_str("NoDeposit"));
@@ -444,9 +388,7 @@ impl Contract {
         self.advance_head();
     }
 
-    /// Phase 1 of the three-phase claim. Booking is the first thing that
-    /// happens, exactly as the origin `claim` calls `_book()` on entry; the
-    /// holder and slot checks run in the callbacks that follow.
+    /// Phase 1 claim: books first, then runs async holder/slot checks.
     pub fn claim(&mut self, token_id: TokenId, min_paid: U128) -> Promise {
         self.assert_bound();
         require!(self.pending_claim.is_none(), "ClaimInFlight");
@@ -459,8 +401,7 @@ impl Contract {
         self.book_inner(claimant)
     }
 
-    /// Phase 3. Credits only when the surrender transfer succeeded and the
-    /// episode is still the one the checks ran against.
+    /// Phase 3: credits on successful surrender within the same episode.
     #[private]
     pub fn claim_callback(
         &mut self,
@@ -504,7 +445,7 @@ impl Contract {
             return;
         }
 
-        let drained = self.drain_immature(available.0);
+        let drained = self.drain_pool(available.0);
         let from_reserve = available.0.saturating_sub(drained);
         require!(from_reserve <= self.reserve.0, "LedgerUnderflow");
         self.reserve = U128(self.reserve.0 - from_reserve);
@@ -518,13 +459,9 @@ impl Contract {
         self.advance_head();
     }
 
-    /// Factory-only dark clock, rate-limited so an attestor cannot oscillate
-    /// the board's state for free.
+    /// Factory-only dark clock, rate-limited.
     pub fn mark_dark(&mut self) {
-        require!(
-            env::predecessor_account_id() == self.factory,
-            "NotFactory"
-        );
+        require!(env::predecessor_account_id() == self.factory, "NotFactory");
         self.assert_bound();
         require!(self.dark_since == 0, "AlreadyDark");
         self.rate_limit();
@@ -534,10 +471,7 @@ impl Contract {
     }
 
     pub fn clear_dark(&mut self) {
-        require!(
-            env::predecessor_account_id() == self.factory,
-            "NotFactory"
-        );
+        require!(env::predecessor_account_id() == self.factory, "NotFactory");
         self.assert_bound();
         require!(self.dark_since != 0, "NotDark");
         self.rate_limit();
@@ -551,8 +485,7 @@ impl Contract {
         self.last_transition_at = now;
     }
 
-    /// Native reserve funding. An FT-settled vault funds its reserve through
-    /// `ft_transfer_call` with `{"reserve": true}` instead.
+    /// Native reserve funding (FT vaults use `ft_transfer_call` with `{"reserve": true}`).
     #[payable]
     pub fn fund_reserve(&mut self) {
         require!(self.settlement_ft.is_none(), "UseFtTransferCall");
@@ -567,13 +500,9 @@ impl Contract {
         );
     }
 
-    /// Factory-owner authority, proxied by the factory: only the factory may
-    /// call this, and the factory gates it on its owner. Locked while dark.
+    /// Factory-owner reserve withdrawal; locked while dark.
     pub fn withdraw_reserve(&mut self, amount: U128, to: AccountId) {
-        require!(
-            env::predecessor_account_id() == self.factory,
-            "NotFactory"
-        );
+        require!(env::predecessor_account_id() == self.factory, "NotFactory");
         require!(self.dark_since == 0, "ReserveLocked");
         require!(
             amount.0 != 0 && amount.0 <= self.reserve.0,
@@ -583,8 +512,7 @@ impl Contract {
         self.pay_out(&to, amount);
     }
 
-    /// Pull ledger: pay the predecessor. One yocto guards a leaked
-    /// function-call key.
+    /// Pull ledger withdraw with 1-yocto guard.
     #[payable]
     pub fn withdraw(&mut self) {
         assert_one_yocto();
@@ -597,16 +525,14 @@ impl Contract {
         self.withdraw_to(&account);
     }
 
-    /// Returns value that is not the settlement asset to the site owner.
-    /// `token = "near"` selects native value on an FT-settled vault; on a
-    /// native-settled vault native is the settlement asset and is refused.
+    /// Sweeps non-settlement assets (`token = "near"` for native on FT vaults) to site owner.
     pub fn sweep_foreign(&mut self, token: AccountId) {
         self.assert_bound();
         if token.as_str() == NATIVE_TOKEN_KEY {
             require!(self.settlement_ft.is_some(), "NotForeign");
-            let amount = self.native_free_balance();
+            let amount = self.free_near();
             require!(amount != 0, "NothingToSweep");
-            self.request_site_owner(token, U128(amount));
+            self.fetch_owner(token, U128(amount));
             return;
         }
         require!(self.settlement_ft.as_ref() != Some(&token), "NotForeign");
@@ -642,7 +568,7 @@ impl Contract {
             .unwrap_or_else(|_| env::panic_str("ForeignBalanceUnavailable"))
             .0;
         require!(balance != 0, "NothingToSweep");
-        self.request_site_owner(token, U128(balance));
+        self.fetch_owner(token, U128(balance));
     }
 
     #[private]
@@ -672,12 +598,10 @@ impl Contract {
         self.dark_since != 0
     }
 
-    /// Inbound this vault holds that is neither booked, credited nor reserve.
-    /// For an FT vault this reads the balance cached at the last book or
-    /// inbound transfer; the SDK can compose a fresh read from `ft_balance_of`.
+    /// Unaccounted balance (`ft_balance_cache` on FT vaults).
     pub fn unbooked(&self) -> U128 {
         let balance = match self.settlement_ft {
-            None => self.native_free_balance(),
+            None => self.free_near(),
             Some(_) => self.ft_balance_cache.0,
         };
         let accounted = self
@@ -690,18 +614,14 @@ impl Contract {
 
     /// Deposits the publisher has not earned yet: what a claim may drain.
     pub fn immature_pool(&self) -> U128 {
-        U128(self.immature_pool_inner())
+        U128(self.immature_sum())
     }
 
-    /// Vault-local claim components: the immature pool, the reserve and the
-    /// unbooked balance. The site legs (`treasury_balance`,
-    /// `pending_withdrawals`) are live reads the SDK composes in
-    /// `escrow.ts` — they are deliberately NOT cached here, so one claim quote
-    /// has exactly one source per leg and cannot double-count a booking.
+    /// Vault-local claimable total (`immature_pool`, `reserve`, `unbooked`); `escrow.ts` adds live site legs.
     pub fn claimable_local(&self, token_id: TokenId) -> U128 {
         let _ = token_id;
         U128(
-            self.immature_pool_inner()
+            self.immature_sum()
                 .saturating_add(self.reserve.0)
                 .saturating_add(self.unbooked().0),
         )
@@ -753,14 +673,12 @@ impl Contract {
                 NearToken::from_yoctonear(0),
                 Gas::from_tgas(20),
             )
-            .then(
-                Promise::new(env::current_account_id()).function_call(
-                    "book_step_callback".to_owned(),
-                    b"{}".to_vec(),
-                    NearToken::from_yoctonear(0),
-                    Gas::from_tgas(15),
-                ),
-            )
+            .then(Promise::new(env::current_account_id()).function_call(
+                "book_step_callback".to_owned(),
+                b"{}".to_vec(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(15),
+            ))
     }
 
     fn finish_booking(&mut self, balance: u128) {
@@ -814,14 +732,12 @@ impl Contract {
                 NearToken::from_yoctonear(0),
                 Gas::from_tgas(15),
             )
-            .then(
-                Promise::new(env::current_account_id()).function_call(
-                    "claim_holder_callback".to_owned(),
-                    b"{}".to_vec(),
-                    NearToken::from_yoctonear(0),
-                    Gas::from_tgas(20),
-                ),
-            )
+            .then(Promise::new(env::current_account_id()).function_call(
+                "claim_holder_callback".to_owned(),
+                b"{}".to_vec(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(20),
+            ))
             .detach();
     }
 
@@ -897,7 +813,7 @@ impl Contract {
             .copied()
             .unwrap_or_else(|| env::panic_str("NotApproved"));
         let available = self
-            .immature_pool_inner()
+            .immature_sum()
             .saturating_add(self.reserve.0)
             .min(slot.last_price.0);
         require!(available != 0, "NothingToClaim");
@@ -939,7 +855,7 @@ impl Contract {
             .detach();
     }
 
-    fn request_site_owner(&self, token: AccountId, amount: U128) {
+    fn fetch_owner(&self, token: AccountId, amount: U128) {
         let site = self
             .site
             .clone()
@@ -964,33 +880,35 @@ impl Contract {
             .detach();
     }
 
-    fn drain_immature(&mut self, want: u128) -> u128 {
+    fn drain_pool(&mut self, want: u128) -> u128 {
         let mut drained = 0u128;
         let length = self.deposits.len();
         let mut index = u32::try_from(self.head).unwrap_or(length);
         while index < length && drained < want {
-            if let Some(mut deposit) = self.deposits.get(index).cloned() {
-                if deposit.amount.0 != 0 && !self.is_mature(&deposit) {
-                    let take = (want - drained).min(deposit.amount.0);
-                    deposit.amount = U128(deposit.amount.0 - take);
-                    self.deposits.replace(index, deposit);
-                    drained += take;
-                }
+            if let Some(mut deposit) = self.deposits.get(index).cloned()
+                && deposit.amount.0 != 0
+                && !self.is_mature(&deposit)
+            {
+                let take = (want - drained).min(deposit.amount.0);
+                deposit.amount = U128(deposit.amount.0 - take);
+                self.deposits.replace(index, deposit);
+                drained += take;
             }
             index += 1;
         }
         drained
     }
 
-    fn immature_pool_inner(&self) -> u128 {
+    fn immature_sum(&self) -> u128 {
         let length = self.deposits.len();
         let mut total = 0u128;
         let mut index = u32::try_from(self.head).unwrap_or(length);
         while index < length {
-            if let Some(deposit) = self.deposits.get(index) {
-                if deposit.amount.0 != 0 && !self.is_mature(deposit) {
-                    total = total.saturating_add(deposit.amount.0);
-                }
+            if let Some(deposit) = self.deposits.get(index)
+                && deposit.amount.0 != 0
+                && !self.is_mature(deposit)
+            {
+                total = total.saturating_add(deposit.amount.0);
             }
             index += 1;
         }
@@ -1015,8 +933,7 @@ impl Contract {
                 .saturating_add(dark_gap_ns)
     }
 
-    /// `darkAccrued` plus the running episode: what a deposit booked now must
-    /// carry so it cannot mature during the blackout it was born in.
+    /// `darkAccrued` plus current episode elapsed seconds.
     fn dark_now(&self) -> u64 {
         if self.dark_since == 0 {
             self.dark_accrued
@@ -1095,9 +1012,8 @@ impl Contract {
         }
     }
 
-    /// Native value this account can spend without eating its own storage
-    /// stake or a locked balance.
-    fn native_free_balance(&self) -> u128 {
+    /// Native balance minus storage stake and locked balance.
+    fn free_near(&self) -> u128 {
         let stake = env::storage_byte_cost()
             .as_yoctonear()
             .saturating_mul(u128::from(env::storage_usage()));

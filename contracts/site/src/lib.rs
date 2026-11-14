@@ -1,43 +1,31 @@
-//! stele site contract: NEP-171 slot NFTs, the market spine, and the pull
-//! ledger.
-//! Wave 2 builds the state surface and money spine from `p0-nfts.md`
-//! sections 3.3, 3.6 and 4 steps 5-6. `NonFungibleToken` derives
-//! NEP-171/177/178/181 and NEP-145; `Owner` holds the admin slot, with no
-//! `owner_id` field. This crate adds registration, the floor/ask levers,
-//! `buy`/`buy_for` with the storage gate, the pull ledger and admin setters.
-//! Tenancy (`list_for_rent`, `rent`, `extend_rental`, `claim_rent`,
-//! `end_rental`, `edit`, `can_edit`, `set_editor`, `editor_of`) lives here.
-//! A sale settles the outgoing rent, clears the listing, and keeps the term.
-//! Modules: [`pricing`] pure `U256` money math (the parity target);
-//! [`rentals`] pure rent math and predicates; [`terms`] clamps and ratchets;
-//! [`events`] the 39 ported NEP-297 events; [`transfer_hook`] approval
-//! revocation; [`views`] every read-only method; [`ft_receiver`] the NEP-141
-//! `ft_on_transfer` entry point.
+//! stele site contract: NEP-171 slot NFTs, `buy`/`buy_for` market spine, and pull ledger (`U256`, NEP-297 39 events, steps 5-6).
+//! `NonFungibleToken` derives NEP-171/177/178/181 and NEP-145; `Owner` holds the admin slot (`p0-nfts.md` 3.3, 3.6, 4.5-6).
+//! Tenancy (`list_for_rent`, `rent`, `extend_rental`, `claim_rent`, `end_rental`, `edit`, `can_edit`, `set_editor`, `editor_of`) settles outgoing rent on sale and keeps the term.
+//! Modules: [`pricing`], [`rentals`], [`terms`], [`events`] (39, NEP-297), [`hook`] (`transfer_hook`), [`views`], [`ft`] (`ft_receiver`).
 
 pub mod events;
-pub mod ft_receiver;
+pub mod ft;
+pub mod hook;
 pub mod pricing;
 pub mod rentals;
 pub mod terms;
-pub mod transfer_hook;
 pub mod views;
 
-pub use transfer_hook::SiteTransferHook;
-
+pub use hook::SiteTransferHook;
 use std::borrow::Cow;
 
 use near_sdk::borsh::BorshSerialize;
-use near_sdk::json_types::{U128, U64};
+use near_sdk::json_types::{U64, U128};
 use near_sdk::store::{LookupMap, Vector};
 use near_sdk::utils::{assert_one_yocto, is_promise_success};
 use near_sdk::{
-    env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise,
-    PromiseOrValue,
+    AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise, PromiseOrValue, env, near,
+    require,
 };
 use near_sdk_contract_tools::nft::nep171::Nep171TransferAuthorization;
 use near_sdk_contract_tools::nft::{
-    ext_nep145, ContractMetadata, Nep145Controller, Nep171Controller, Nep171Transfer,
-    Nep177Controller, Nep178Controller, StorageBalanceBounds, Token, TokenMetadata,
+    ContractMetadata, Nep145Controller, Nep171Controller, Nep171Transfer, Nep177Controller,
+    Nep178Controller, StorageBalanceBounds, Token, TokenMetadata, ext_nep145,
 };
 use near_sdk_contract_tools::owner::Owner as OwnerTrait;
 use near_sdk_contract_tools::{NonFungibleToken, Owner};
@@ -46,23 +34,20 @@ use primitive_types::U256;
 use crate::events::SteleEvent;
 use crate::pricing::TakeQuote;
 
-/// Nanoseconds per second: configuration stays in seconds, state keeps
-/// nanoseconds, and every comparison converts here.
+/// Nanoseconds per second (config uses seconds; state uses nanoseconds).
 pub(crate) const NS_PER_SEC: u64 = 1_000_000_000;
-/// Nanoseconds per millisecond: NEP-177 timestamps are milliseconds.
+/// Nanoseconds per millisecond (NEP-177 timestamps).
 pub(crate) const NS_PER_MS: u64 = 1_000_000;
-/// NEP-145 minimum balance, also the port's stand-in for one token's storage
-/// bytes: 700 bytes at 1e19 yocto per byte is 7 mNEAR (the tutorial bound).
+/// NEP-145 minimum balance (700 B * 1e19 yocto = 7 mNEAR).
 pub(crate) const TOKEN_STORAGE_MILLINEAR: u128 = 7;
-/// NEP-145 maximum balance (the tutorial bound, 21 mNEAR).
+/// NEP-145 maximum balance (21 mNEAR).
 pub(crate) const MAX_STORAGE_MILLINEAR: u128 = 21;
-/// `MAX_ROYALTY_BPS` from the origin.
+/// Origin `MAX_ROYALTY_BPS`.
 pub(crate) const MAX_ROYALTY_BPS: u16 = 1_000;
-/// The origin `implementationVersion()` value.
+/// Origin `implementationVersion()`.
 pub(crate) const IMPLEMENTATION_VERSION: u32 = 2;
 
-/// Readable dotted slot key, used directly as the NEP-171 `token_id`
-/// (documented deviation: origin used a hashed key).
+/// Readable dotted slot key used directly as NEP-171 `token_id`.
 pub type TokenId = String;
 
 /// Per-slot market state. Timestamps are nanoseconds at the contract boundary;
@@ -151,6 +136,17 @@ pub struct BuyPlan {
     pub previous_owner: Option<AccountId>,
 }
 
+/// Internal inputs for `Contract::settle_buy` (not part of the contract ABI).
+pub(crate) struct BuyOrder {
+    pub recipient: AccountId,
+    pub token_id: TokenId,
+    pub max_price: U128,
+    pub expected_terms: String,
+    pub deadline_ns: u64,
+    pub charged: U128,
+    pub is_ft: bool,
+}
+
 /// Storage prefixes for the site-owned maps. Distinct from the derive's
 /// `DefaultStorageKey` prefixes (`~$171`, `~$177`, ...), which begin with
 /// ASCII bytes.
@@ -201,18 +197,7 @@ pub struct Contract {
 /// market spine, the pull ledger and the admin setters.
 #[near]
 impl Contract {
-    /// Origin `initialize`, plus the two factory-supplied treasury fields.
-    /// The factory supplies `min_slot_floor` from the settlement asset's real
-    /// decimals: native 24 gives `10^20`; the 6-decimal mock FT gives `100`.
-    /// `new` does not read `ft_metadata`, because that call is asynchronous.
-    /// Documented deviation: the origin took a treasury address that the owner
-    /// could repoint until a factory pinned it later. On NEAR the factory
-    /// creates an escrowed site whose `Owner` derive slot is the publisher, not
-    /// the factory, so a post-create owner call cannot pin the treasury in one
-    /// atomic step. `new` therefore takes `treasury` (default:
-    /// `protocol_treasury`) and `treasury_pinned`, so `create_escrowed_site`
-    /// can pin the vault in the same receipt as the deploy. A pinned site's
-    /// `set_treasury` refuses to repoint.
+    /// Origin `initialize`, plus factory-supplied `protocol_treasury`, `treasury`, `treasury_pinned` (`create_escrowed_site`), and `min_slot_floor` (24 decimals -> `10^20`, 6-decimal FT -> `100`, skipping async `ft_metadata`). Pinned sites refuse `set_treasury`.
     #[init]
     pub fn new(
         owner_id: AccountId,
@@ -274,8 +259,7 @@ impl Contract {
         contract
     }
 
-    /// Origin `registerSlots`. Registration is permanent. Keys are identities,
-    /// so a duplicate is rejected, not re-registered.
+    /// Origin `registerSlots`. Permanent; duplicate keys panic.
     #[payable]
     pub fn register_slots(&mut self, keys: Vec<TokenId>, floors: Vec<U128>) {
         Self::require_owner();
@@ -283,8 +267,7 @@ impl Contract {
         self.register_slots_inner(keys, floors);
     }
 
-    /// Origin `setAvailability`: the reversible half of registration. Legal on
-    /// a claimed slot. It gates claims only, never takes.
+    /// Origin `setAvailability`. Reversible; gates claims only, not takes.
     #[payable]
     pub fn set_availability(&mut self, keys: Vec<TokenId>, available: bool) {
         Self::require_owner();
@@ -298,12 +281,15 @@ impl Contract {
             require!(slot.registered, "SlotNotRegistered");
             slot.available = available;
             self.slots.insert(key.clone(), slot);
-            SteleEvent::AvailabilitySet { token_id: key, available }.emit();
+            SteleEvent::AvailabilitySet {
+                token_id: key,
+                available,
+            }
+            .emit();
         }
     }
 
-    /// Origin `setFloor`: the `min_slot_floor` floor, a per-call delta band, and
-    /// a cooldown. The band and the cooldown are seconds at the boundary.
+    /// Origin `setFloor`: enforces `min_slot_floor`, delta band, and cooldown.
     #[payable]
     pub fn set_floor(&mut self, token_id: TokenId, new_floor: U128) {
         Self::require_owner();
@@ -344,10 +330,7 @@ impl Contract {
         .emit();
     }
 
-    /// Origin `setAsk`. The ask is the reversion BASE, not a list price, and
-    /// the ceiling anchors to `last_price`/`base_price` so asks cannot compound.
-    /// The one-yocto guard means a leaked function-call key cannot reprice an
-    /// ask: function-call keys cannot attach a deposit.
+    /// Origin `setAsk`: sets reversion base anchored to `last_price`/`base_price`; 1-yocto blocks function-call keys.
     #[payable]
     pub fn set_ask(&mut self, token_id: TokenId, ask_floor: U128) {
         assert_one_yocto();
@@ -392,15 +375,15 @@ impl Contract {
         deadline_ns: u64,
     ) -> PromiseOrValue<U128> {
         let recipient = env::predecessor_account_id();
-        self.settle_buy(
+        self.settle_buy(BuyOrder {
             recipient,
             token_id,
             max_price,
             expected_terms,
             deadline_ns,
-            U128(env::attached_deposit().as_yoctonear()),
-            false,
-        )
+            charged: U128(env::attached_deposit().as_yoctonear()),
+            is_ft: false,
+        })
     }
 
     /// Origin `buyFor`: the payer is the predecessor, the recipient is not.
@@ -413,15 +396,15 @@ impl Contract {
         expected_terms: String,
         deadline_ns: u64,
     ) -> PromiseOrValue<U128> {
-        self.settle_buy(
+        self.settle_buy(BuyOrder {
             recipient,
             token_id,
             max_price,
             expected_terms,
             deadline_ns,
-            U128(env::attached_deposit().as_yoctonear()),
-            false,
-        )
+            charged: U128(env::attached_deposit().as_yoctonear()),
+            is_ft: false,
+        })
     }
 
     /// Second phase of a native buy that had to fund the recipient's NEP-145
@@ -458,8 +441,7 @@ impl Contract {
         self.execute_buy(&recipient, &payer, &token_id, &plan);
     }
 
-    /// Pull ledger: pay the predecessor. One yocto guards against a leaked
-    /// function-call key draining a balance.
+    /// Pull ledger withdraw; 1-yocto blocks function-call keys.
     #[payable]
     pub fn withdraw(&mut self) {
         assert_one_yocto();
@@ -467,26 +449,26 @@ impl Contract {
         self.withdraw_credit(&account);
     }
 
-    /// Permissionless: pay a named account. It grants no new authority because
-    /// the destination is fixed by the call.
+    /// Permissionless withdraw to named account.
     pub fn withdraw_for(&mut self, account: AccountId) {
         self.withdraw_credit(&account);
     }
 
-    /// Permissionless: pay the pinned treasury in full. Full sweep so nobody
-    /// can grief with dust.
+    /// Permissionless full sweep to pinned treasury.
     pub fn sweep_treasury(&mut self) {
         let amount = self.treasury_balance;
         require!(amount.0 != 0, "NothingToWithdraw");
         self.treasury_balance = U128(0);
         let treasury = self.treasury.clone();
-        SteleEvent::TreasurySwept { treasury: treasury.clone(), amount }.emit();
+        SteleEvent::TreasurySwept {
+            treasury: treasury.clone(),
+            amount,
+        }
+        .emit();
         self.pay_out(&treasury, amount);
     }
 
-    /// Owner-only treasury withdrawal. On a native site any attached value is
-    /// booked to the treasury balance, mirroring the origin `receive()`; on an
-    /// FT site native value is refused because the ledger is token-denominated.
+    /// Owner-only treasury withdrawal; native sites credit attached value (`receive()`), FT sites refuse it.
     #[payable]
     pub fn withdraw_treasury(&mut self, amount: U128) {
         Self::require_owner();
@@ -508,13 +490,15 @@ impl Contract {
             )
         };
         let treasury = self.treasury.clone();
-        SteleEvent::TreasurySwept { treasury: treasury.clone(), amount }.emit();
+        SteleEvent::TreasurySwept {
+            treasury: treasury.clone(),
+            amount,
+        }
+        .emit();
         self.pay_out(&treasury, amount);
     }
 
-    /// Replaces the whole configuration. The ratchet block runs before the
-    /// absolute clamps (origin error order), and the floor-policy ratchet runs
-    /// too because this setter also carries the floor knobs.
+    /// Replaces `SiteConfig`; ratchets run before absolute clamps (origin error order).
     pub fn set_economics(&mut self, next: SiteConfig) {
         Self::require_owner();
         terms::check_economics(&self.config, &next, self.terms_locked);
@@ -596,7 +580,6 @@ impl Contract {
         self.config = next;
     }
 
-
     /// Origin `setTreasury`; blocked forever once a factory pinned the vault.
     pub fn set_treasury(&mut self, treasury: AccountId) {
         Self::require_owner();
@@ -631,7 +614,11 @@ impl Contract {
     pub fn set_base_uri(&mut self, uri: String) {
         Self::require_owner();
         let mut metadata = self.contract_metadata();
-        metadata.base_uri = if uri.is_empty() { None } else { Some(uri.clone()) };
+        metadata.base_uri = if uri.is_empty() {
+            None
+        } else {
+            Some(uri.clone())
+        };
         self.set_contract_metadata(&metadata);
         SteleEvent::BaseTokenUriSet { uri }.emit();
     }
@@ -650,12 +637,7 @@ impl Contract {
     /// cap. `rate_per_day == 0` delists. One yocto so a leaked function-call
     /// key cannot reprice a listing.
     #[payable]
-    pub fn list_for_rent(
-        &mut self,
-        token_id: TokenId,
-        rate_per_day: U128,
-        max_duration_secs: u64,
-    ) {
+    pub fn list_for_rent(&mut self, token_id: TokenId, rate_per_day: U128, max_duration_secs: u64) {
         let owner = self
             .token_owner(&token_id)
             .unwrap_or_else(|| env::panic_str("NotSlotOwner"));
@@ -878,10 +860,10 @@ impl Contract {
         let Some(owner) = self.token_owner(&token_id) else {
             return false;
         };
-        if let Some(rental) = self.rentals.get(&token_id) {
-            if env::block_timestamp() < rental.expiry {
-                return account == rental.tenant;
-            }
+        if let Some(rental) = self.rentals.get(&token_id)
+            && env::block_timestamp() < rental.expiry
+        {
+            return account == rental.tenant;
         }
         if account == owner {
             return true;
@@ -942,10 +924,9 @@ impl Contract {
     }
 }
 
-/// Internals: validation, pricing at the boundary, booking and payout. These
-/// are not exported (`#[near]` is deliberately absent).
+/// Internal helpers (`#[near]` omitted): validation, pricing, booking, payout (`#[init]` / `Value(price)` / `Value(change)` / `Promise`).
 impl Contract {
-    /// Registers a batch, used by both `new` and the guarded external method.
+    /// Registers slots in batch (called by `new` and `register_slots`).
     fn register_slots_inner(&mut self, keys: Vec<TokenId>, floors: Vec<U128>) {
         require!(keys.len() == floors.len(), "LengthMismatch");
         for (key, floor) in keys.into_iter().zip(floors) {
@@ -953,12 +934,15 @@ impl Contract {
         }
     }
 
-    /// Origin `_register`, one key at a time. Duplicates are rejected whether
-    /// they appear earlier in the batch or in an earlier call.
+    /// Origin `_register`: registers one key; rejects duplicates.
     fn register_one(&mut self, key: TokenId, floor: U128) {
         require!(floor.0 >= self.min_slot_floor.0, "InvalidFloor");
         require!(
-            !self.slots.get(&key).map(|slot| slot.registered).unwrap_or(false),
+            !self
+                .slots
+                .get(&key)
+                .map(|slot| slot.registered)
+                .unwrap_or(false),
             "SlotAlreadyRegistered"
         );
         let now_ns = env::block_timestamp();
@@ -986,8 +970,7 @@ impl Contract {
         .emit();
     }
 
-    /// All the buy guards plus the settled split, computed once so the money
-    /// legs cannot drift between the planning receipt and the callback.
+    /// Evaluates buy guards and computes `BuyPlan` once before callback.
     fn plan_buy(
         &mut self,
         token_id: &TokenId,
@@ -1051,21 +1034,17 @@ impl Contract {
         }
     }
 
-    /// The single money spine. `charged` is the native attached deposit or the
-    /// transferred FT amount; it is a budget, never the price.
-    /// Returns `Value(price)` for an inline native settlement,
-    /// `Value(change)` for an FT settlement (the NEP-141 refund convention) and
-    /// `Promise` when the recipient's storage top-up needs a second receipt.
-    pub(crate) fn settle_buy(
-        &mut self,
-        recipient: AccountId,
-        token_id: TokenId,
-        max_price: U128,
-        expected_terms: String,
-        deadline_ns: u64,
-        charged: U128,
-        is_ft: bool,
-    ) -> PromiseOrValue<U128> {
+    /// Single money spine; `charged` is native deposit or FT budget, returning `Value(price|change)` or `Promise`.
+    pub(crate) fn settle_buy(&mut self, order: BuyOrder) -> PromiseOrValue<U128> {
+        let BuyOrder {
+            recipient,
+            token_id,
+            max_price,
+            expected_terms,
+            deadline_ns,
+            charged,
+            is_ft,
+        } = order;
         if is_ft {
             require!(self.settlement_ft.is_some(), "FtNotAccepted");
             let balance = self
@@ -1128,7 +1107,13 @@ impl Contract {
             .storage_deposit(Some(recipient.clone()), Some(false));
         let callback = Self::ext(env::current_account_id())
             .with_static_gas(Gas::from_tgas(60))
-            .settle_buy_callback(recipient, payer, token_id, plan, U128(top_up.as_yoctonear()));
+            .settle_buy_callback(
+                recipient,
+                payer,
+                token_id,
+                plan,
+                U128(top_up.as_yoctonear()),
+            );
         PromiseOrValue::Promise(deposit_promise.then(callback))
     }
 
@@ -1545,9 +1530,8 @@ impl Contract {
         self.refund_or_credit(payer, refund)
     }
 
-    /// `max(bounds.min - total, token_bytes - available)`, where one token's
-    /// bytes are the tutorial's 700-byte bound (7 mNEAR).
-    fn storage_shortfall(&self, recipient: &AccountId) -> NearToken {
+    /// Storage top-up forwarded to `storage_deposit`: `max(bounds.min - total, token_bytes - available)` (700 B = 7 mNEAR), capped by `bounds.max`, reading balance and bounds once.
+    fn storage_top_up(&self, recipient: &AccountId) -> NearToken {
         let bounds = self.get_storage_balance_bounds();
         let balance = self.get_storage_balance(recipient.as_ref()).ok();
         let zero = NearToken::from_yoctonear(0);
@@ -1557,34 +1541,18 @@ impl Contract {
             .map(|value| value.available)
             .unwrap_or(zero);
         let token_bytes = NearToken::from_millinear(TOKEN_STORAGE_MILLINEAR);
-        bounds
+        let shortfall = bounds
             .min
             .saturating_sub(total)
-            .max(token_bytes.saturating_sub(available))
-    }
-
-    /// The shortfall actually forwarded to `storage_deposit`: capped by the
-    /// bounds maximum, and refused outright when even a full top-up cannot
-    /// leave room for one token.
-    fn storage_top_up(&self, recipient: &AccountId) -> NearToken {
-        let shortfall = self.storage_shortfall(recipient);
+            .max(token_bytes.saturating_sub(available));
         if shortfall.is_zero() {
             return shortfall;
         }
-        let balance = self.get_storage_balance(recipient.as_ref()).ok();
-        let zero = NearToken::from_yoctonear(0);
-        let total = balance.as_ref().map(|value| value.total).unwrap_or(zero);
-        let available = balance
-            .as_ref()
-            .map(|value| value.available)
-            .unwrap_or(zero);
-        let bounds = self.get_storage_balance_bounds();
         let headroom = bounds
             .max
             .map(|max| max.saturating_sub(total))
             .unwrap_or(NearToken::from_yoctonear(u128::MAX));
         let top_up = shortfall.min(headroom);
-        let token_bytes = NearToken::from_millinear(TOKEN_STORAGE_MILLINEAR);
         require!(
             available.saturating_add(top_up) >= token_bytes,
             "RecipientStorageExhausted"
@@ -1606,7 +1574,8 @@ impl Contract {
         let updated = current
             .checked_add(amount.0)
             .unwrap_or_else(|| env::panic_str("LedgerOverflow"));
-        self.pending_withdrawals.insert(account.clone(), U128(updated));
+        self.pending_withdrawals
+            .insert(account.clone(), U128(updated));
     }
 
     /// Deducts before sending. The entry is removed in the same receipt that
@@ -1614,7 +1583,11 @@ impl Contract {
     fn withdraw_credit(&mut self, account: &AccountId) {
         let amount = self.pending_withdrawals.remove(account).unwrap_or(U128(0));
         require!(amount.0 != 0, "NothingToWithdraw");
-        SteleEvent::PayoutWithdrawn { account: account.clone(), amount }.emit();
+        SteleEvent::PayoutWithdrawn {
+            account: account.clone(),
+            amount,
+        }
+        .emit();
         self.pay_out(account, amount);
     }
 

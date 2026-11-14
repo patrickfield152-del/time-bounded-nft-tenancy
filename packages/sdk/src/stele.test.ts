@@ -15,18 +15,19 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { FailoverRpcProvider, JsonRpcProvider, KeyPair, MultiKeySigner } from 'near-api-js';
 import type { KeyPairString } from 'near-api-js';
-import { mediaHash, sha256Hex } from './content';
+import { cidToContentHash, contentHashToCid, mediaHash, sha256Hex } from './content';
 import { accountFromEnv, accountFromKeys, readerFromUrls } from './near';
 import type { Reader } from './near';
+import { computeTakePrice, resolveReversionBase } from './pricing';
 import {
   encumbranceHash,
   readBuyContext,
   readSlots,
+  readSlotsMulti,
   type RentalRecord,
   type SlotBundleView,
   type SlotRecord,
 } from './reads';
-
 const NATIVE_TO_BASE64 = typeof (Uint8Array.prototype as Uint8Array & { toBase64?: unknown }).toBase64 === 'function';
 const keys = [KeyPair.fromRandom('ed25519').toString() as KeyPairString, KeyPair.fromRandom('ed25519').toString() as KeyPairString];
 
@@ -186,5 +187,87 @@ describe('slot bundle reads', () => {
       'is not registered',
     );
     expect(calls.map((call) => call.method)).toEqual(['slot_bundle']);
+  });
+
+  it('readSlotsMulti shares one clock read across multiple boards', async () => {
+    let viewBlocks = 0;
+    const calls: Array<{ method: string; args: Record<string, unknown> }> = [];
+    const reader = {
+      viewBlock: async () => {
+        viewBlocks += 1;
+        return { header: { height: 42, timestamp: 1_700_000_000_000_000_000 } };
+      },
+      callFunction: async (params: { method: string; args: Record<string, unknown> }) => {
+        calls.push({ method: params.method, args: params.args });
+        return bundle;
+      },
+    } as unknown as Reader;
+    const boards = await readSlotsMulti(reader, [
+      { site: 'a.test.near', keys: ['s.1', 's.2'] },
+      { site: 'b.test.near', keys: ['s.3'] },
+    ]);
+    expect(viewBlocks).toBe(1);
+    expect(calls).toHaveLength(3);
+    expect(boards[0]).toHaveLength(2);
+    expect(boards[1]).toHaveLength(1);
+  });
+});
+
+describe('CID codec and 3,714-row parity vectors', () => {
+  it('round-trips contentHashToCid and cidToContentHash across 100 digests', () => {
+    for (let i = 0; i < 100; i++) {
+      const hash = sha256Hex(new Uint8Array([i, (i * 7) & 0xff, 0xaa]));
+      const cid = contentHashToCid(hash);
+      expect(cid.startsWith('bafkrei')).toBe(true);
+      expect(cidToContentHash(cid)).toBe(hash);
+    }
+    expect(() => cidToContentHash('z123')).toThrow('starting "b"');
+    expect(() => cidToContentHash('bafkrei')).toThrow('too short');
+  });
+
+  it('computeTakePrice matches all 3,024 price-vectors and computable v2 ask rows', () => {
+    const priceRows = readFileSync(new URL('../../../vectors/price-vectors.jsonl', import.meta.url), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(priceRows).toHaveLength(3024);
+    for (const r of priceRows) {
+      if (r.overflow) {
+        expect(() =>
+          computeTakePrice(
+            BigInt(r.last_price as string),
+            BigInt(r.base_price as string),
+            BigInt(r.elapsed_weeks as number),
+            BigInt(r.decay_bps as number),
+            BigInt(r.take_bps as number),
+            BigInt(r.max_decay_weeks as number),
+          ),
+        ).toThrow();
+      } else {
+        const q = computeTakePrice(
+          BigInt(r.last_price as string),
+          BigInt(r.base_price as string),
+          BigInt(r.elapsed_weeks as number),
+          BigInt(r.decay_bps as number),
+          BigInt(r.take_bps as number),
+          BigInt(r.max_decay_weeks as number),
+        );
+        expect(q.price.toString()).toBe(r.price);
+        expect(q.effectiveFloor.toString()).toBe(r.effective_floor);
+      }
+    }
+
+    const v2Rows = readFileSync(new URL('../../../vectors/v2-vectors.jsonl', import.meta.url), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((r) => r.kind === 'ask' && !r.overflow);
+    expect(v2Rows.length).toBeGreaterThan(100);
+    for (const r of v2Rows) {
+      const base = resolveReversionBase(BigInt(r.ask_floor as string), BigInt(r.last_price as string));
+      const q = computeTakePrice(base, BigInt(r.base_price as string), 3n, 9700n, 14000n, 52n);
+      expect(q.price.toString()).toBe(r.price);
+      expect(q.effectiveFloor.toString()).toBe(r.effective_floor);
+    }
   });
 });

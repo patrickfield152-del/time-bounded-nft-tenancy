@@ -64,13 +64,14 @@ node scripts/sandbox-dry-run.mjs
   10 tests, 0 failed.
 - Terms/ratchet unit tests: **26**, 0 failed (`cargo test -p stele-site --test terms`).
 - View/encumbrance tests: **2**, 0 failed (`cargo test -p stele-site --test views`).
-- SDK behavior suite: **12** tests in one file (`packages/sdk/src/stele.test.ts`), 0 failed
+- SDK behavior suite: **15** tests in one file (`packages/sdk/src/stele.test.ts`), 0 failed
   (`pnpm exec vitest run packages/sdk/src`).
-- Measured claim: **3,714 parity vector executions** (3,024 + 690), 38 Rust + 12 SDK tests,
+- Measured claim: **3,714 parity vector executions** (3,024 + 690), 38 Rust + 15 SDK tests,
   **0 failed**. Gas is not claimed as a headline; the sandbox can print per-receipt `gas_burnt` if a
   later pass needs it.
-- Prior-wave (W4) release wasm sizes, ABI embedded, not re-measured in this wave: site 482,831 B;
-  factory 252,631 B; escrow 257,875 B; mock-ft 172,779 B.
+- Release wasm sizes (`cargo near build non-reproducible-wasm`, ABI embedded, `opt-level = "z"`,
+  `cdylib`-only on factory/escrow/mock-ft): site 428,124 B; factory 183,047 B; escrow 179,537 B;
+  mock-ft 125,535 B.
 
 ## Layout
 
@@ -94,7 +95,7 @@ typescript 7.0.2 · tsx 4.23.15 · tsup 9.0.0 · vitest 5.1.0 · next 16.4.6 ·
 react/react-dom 19.3.1 · @types/node 26.6.6 · Node >= 26.13.1 (`.nvmrc`) ·
 pnpm 12.18.0 · cargo-near 0.23.0 · wasm-opt 0.116.1.
 
-`pnpm-workspace.yaml` holds the `overrides` entry that keeps exactly one
+`pnpm-workspace.yaml` holds `autoDedupe`, `dedupePeers`, and `overrides` keeping exactly one
 `@hot-labs/near-connect` version in the lockfile. Lockfiles: `Cargo.lock` + `pnpm-lock.yaml`.
 
 ## Environment

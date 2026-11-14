@@ -7,8 +7,8 @@ tenancy and escrow flows, and never calls mainnet or testnet RPC.
 
 ## Prerequisites
 
-- Node.js `>=22.22.2` and pnpm `>=10.4.1` (fixed by `near-api-js` 7.5.3).
-- Rust `>=1.95` and `cargo-near` 0.23.0.
+- Node.js `>=26.13.1` and pnpm `>=12.18.0` (fixed by `near-api-js` 7.5.3).
+- Rust `>=1.100.0` and `cargo-near` 0.23.0.
 - Linux, macOS, or **WSL2 on Windows**. `near-sandbox` ships Linux/macOS
   binaries only; on win32 clone under `/home/...` (not `/mnt/c/...`) and run
   the commands below inside WSL2. `solc`, Foundry and anvil are not needed.

@@ -4,11 +4,13 @@ packages:
 
 # Allow freshly-published patch releases (the host's 24h supply-chain age
 # policy otherwise blocks newly-resolved transitive packages such as rollup).
+autoDedupe: true
+dedupePeers: true
+
 allowBuilds:
   esbuild: true
 
 minimumReleaseAge: 0
-
 overrides:
   "@hot-labs/near-connect": "0.12.0"
 

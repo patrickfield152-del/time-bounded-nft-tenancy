@@ -387,7 +387,7 @@ export async function runMarketFlows(ctx, harness) {
   const takeQuote = await harness.view(nativeSite, "quote", {
     token_id: SLOTS.nativeA,
   });
-  const takeTx = await buyNative(harness, bob, nativeSite, SLOTS.nativeA, log);
+  await buyNative(harness, bob, nativeSite, SLOTS.nativeA, log);
   const ownerAfterTake = await harness.view(nativeSite, "owner_of_or_zero", {
     token_id: SLOTS.nativeA,
   });

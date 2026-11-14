@@ -1,14 +1,5 @@
 /**
- * The TypeScript twin of `packages/websitekit-contracts/src/Pricing.sol`.
- * Keep the operation order, truncation points, and loop bound identical.
- * One price divergence makes every buy revert.
- * - Use native `BigInt`. Convert a `BN` with `BigInt(bn.toString())`.
- *   Do not use `decimal.js` or `big.js`.
- * - Keep the loop iterative. `decayed * decayBps / 10_000` truncates once
- *   per step. `basePrice * 0.9^n` drifts. Never use `Math.pow`.
- * - Guard every multiply and subtract. Solidity 0.8 checked arithmetic
- *   reverts where `BigInt` would continue; the twin must throw too.
- * - uint256 is bounded, `BigInt` is not. Rules 1, 2 and 3 above are why.
+ * TypeScript parity twin of `packages/websitekit-contracts/src/Pricing.sol` (`Pricing.sol`, `BigInt`, `BN` via `BigInt(bn.toString())`, iterative `decayed * decayBps / 10_000` not `basePrice * 0.9^n` / `Math.pow`, uint256 bounds instead of `decimal.js`/`big.js`; see `CLAUDE.md`, `0.8`, `1`, `2`, `3`, `3.2`).
  */
 
 export const BPS_DENOMINATOR = 10_000n;
@@ -16,11 +7,7 @@ export const SECONDS_PER_WEEK = 604_800n;
 
 const U256_MAX = (1n << 256n) - 1n;
 
-/**
- * Thrown where Solidity's checked arithmetic would revert. Distinct from `RangeError` so a caller
- * can tell "this input overflows the chain's word size" from "you passed a negative week count",
- * and never silently caught alongside ordinary validation errors.
- */
+/** Thrown (`RangeError` subclass) where Solidity checked arithmetic overflows or underflows `uint256`. */
 export class PricingOverflowError extends RangeError {
   constructor(op: string) {
     super(`websitekit/pricing: ${op} overflows uint256 — the chain would revert here`);
@@ -35,11 +22,7 @@ function mul(a: bigint, b: bigint): bigint {
   return result;
 }
 
-/**
- * `a - b`, reverting exactly where Solidity's checked subtract does. Named rather than inlined
- * because an unguarded `-` here is precisely how the site's own cut would silently wrap to a huge
- * positive number under a config the contract would have rejected.
- */
+/** `a - b`, throwing on underflow (`-`). */
 function sub(a: bigint, b: bigint): bigint {
   if (b > a) throw new PricingOverflowError('subtract');
   return a - b;
@@ -57,14 +40,7 @@ export interface TakeQuote {
   effectiveFloor: bigint;
 }
 
-/**
- * Mirrors `Pricing.computeTakePrice`.
- * A never-claimed slot has `lastPrice === 0n`, which decays to zero and hands `basePrice` straight
- * to the `max()`. There is deliberately no branch for it — a branch here is a place the two
- * implementations can disagree.
- * @param maxDecayWeeks The site's decay horizon. A parameter rather than a constant because
- * websitekit sites choose their own; pass `52n` and this is byte-identical to v1's function.
- */
+/** Mirrors `Pricing.computeTakePrice`; `lastPrice === 0n` clamps to `basePrice` via `max()`, `maxDecayWeeks = 52n` matches v1. */
 export function computeTakePrice(
   lastPrice: bigint,
   basePrice: bigint,
@@ -74,46 +50,51 @@ export function computeTakePrice(
   maxDecayWeeks: bigint,
 ): TakeQuote {
   const clampedWeeks = elapsedWeeks > maxDecayWeeks ? maxDecayWeeks : elapsedWeeks;
-  let decayed = lastPrice;
-  for (let i = 0n; i < clampedWeeks; i++) {
-    decayed = mul(decayed, decayBps) / BPS_DENOMINATOR;
-    // The floor is a hard clamp: once the decay reaches `basePrice`, every further week
-    // multiplies `basePrice` by less than one and stays there. The parity vectors confirm the
-    // result is identical, so the loop stops instead of burning weeks on a fixed value.
+  let effectiveFloor: bigint;
+  if (clampedWeeks === 0n) {
+    effectiveFloor = lastPrice > basePrice ? lastPrice : basePrice;
+  } else if (decayBps === BPS_DENOMINATOR) {
+    mul(lastPrice, BPS_DENOMINATOR);
+    effectiveFloor = lastPrice > basePrice ? lastPrice : basePrice;
+  } else if (lastPrice <= basePrice && decayBps <= BPS_DENOMINATOR) {
+    mul(lastPrice, decayBps);
+    effectiveFloor = basePrice;
+  } else if (decayBps === 0n) {
+    effectiveFloor = basePrice;
+  } else {
+    let decayed = mul(lastPrice, decayBps) / BPS_DENOMINATOR;
     if (decayed <= basePrice) {
-      decayed = basePrice;
-      break;
+      effectiveFloor = basePrice;
+    } else if (decayBps < BPS_DENOMINATOR) {
+      for (let i = 1n; i < clampedWeeks; i++) {
+        decayed = (decayed * decayBps) / BPS_DENOMINATOR;
+        if (decayed <= basePrice) {
+          decayed = basePrice;
+          break;
+        }
+      }
+      effectiveFloor = decayed;
+    } else {
+      for (let i = 1n; i < clampedWeeks; i++) {
+        decayed = mul(decayed, decayBps) / BPS_DENOMINATOR;
+        if (decayed <= basePrice) {
+          decayed = basePrice;
+          break;
+        }
+      }
+      effectiveFloor = decayed > basePrice ? decayed : basePrice;
     }
   }
-  const effectiveFloor = decayed > basePrice ? decayed : basePrice;
   const price = mul(effectiveFloor, takeBps) / BPS_DENOMINATOR;
   return { price, effectiveFloor };
 }
 
-/**
- * Mirrors `Pricing.resolveReversionBase` — spec §3.
- * The reversion base is the owner's posted ask when they have one, and what they paid otherwise.
- * **This is why every pre-v2 take-price vector is still valid.** The ask enters pricing as the BASE
- * that `computeTakePrice` reverts from, not as a multiplier applied to its result, so with no ask
- * posted (`askFloor === 0n`) the value handed downstream is `lastPrice` unchanged and pricing
- * behaves exactly as it did before §3 existed. A multiplier would have invalidated the whole
- * existing grid; this is the design choice that did not.
- * Not a list price, and not what a buyer pays. It is cleared on every sale — a new owner inherits no
- * ask — so a UI that renders it as an asking price is showing something the contract does not mean.
- */
+/** Mirrors `Pricing.resolveReversionBase`; `askFloor === 0n` uses `lastPrice`, posted ask clears on sale. */
 export function resolveReversionBase(askFloor: bigint, lastPrice: bigint): bigint {
   return askFloor !== 0n ? askFloor : lastPrice;
 }
 
-/**
- * Mirrors `Pricing.askCeiling` — spec §3.2. The highest ask an owner may post.
- * Anchored to `lastPrice`, which moves only on a sale, or to `basePrice` when that is higher.
- * **Never to the effective floor**, which is downstream of the ask itself once one is posted:
- * anchoring there would let each ask raise the ceiling for the next and compound into an unbounded
- * ratchet. Anchoring to a value the ask cannot influence is what bounds it.
- * `maxAskBps` is clamped below at `10_000` and has no upper clamp, so a large anchor can overflow
- * the multiply. Throws where the chain reverts, like every other guarded multiply here.
- */
+/** Mirrors `Pricing.askCeiling`; `maxAskBps` (`>= 10_000`) anchors to `max(lastPrice, basePrice)` so asks cannot compound. */
 export function askCeiling(lastPrice: bigint, basePrice: bigint, maxAskBps: bigint): bigint {
   const anchor = lastPrice > basePrice ? lastPrice : basePrice;
   return bpsOf(anchor, maxAskBps);
@@ -130,15 +111,7 @@ export interface Split {
   siteCut: bigint;
 }
 
-/**
- * Mirrors `Pricing.computeSplit`. Every leg is keyed to `effectiveFloor`, never to `charged` or to
- * a stale `lastPrice` — a displaced owner is paid against what the slot is worth now, not against
- * what they happened to pay for it.
- * Throws where the contract would revert, which for `siteCut` means any config with
- * `takeBps <= payoutBps + protocolBps`. `SlotSite._validateConfig` makes that unreachable on-chain;
- * this function does not re-validate, so a caller inventing a config gets a throw rather than a
- * number no clone could ever produce.
- */
+/** Mirrors `Pricing.computeSplit`; keys payout and protocol cuts to `effectiveFloor` (not `charged`), `siteCut` throws if `takeBps <= payoutBps + protocolBps` (`SlotSite._validateConfig`). */
 export function computeSplit(
   effectiveFloor: bigint,
   price: bigint,
@@ -153,12 +126,7 @@ export function computeSplit(
   return { charged, payout, protocolCut, siteCut };
 }
 
-/**
- * Mirrors `SlotSite._computeElapsedWeeks`. Truncates toward zero, which equals floor because both
- * operands are non-negative. The contract's `uint256` subtraction reverts on underflow; this throws
- * for the same input rather than returning a negative week count that would run the loop zero times
- * and quietly quote the undecayed price.
- */
+/** Mirrors `SlotSite._computeElapsedWeeks`; throws on underflow. */
 export function computeElapsedWeeks(nowTs: bigint, lastPurchaseTs: bigint): bigint {
   if (nowTs < lastPurchaseTs) {
     throw new RangeError('websitekit/pricing: nowTs must be >= lastPurchaseTs');
@@ -166,14 +134,7 @@ export function computeElapsedWeeks(nowTs: bigint, lastPurchaseTs: bigint): bigi
   return (nowTs - lastPurchaseTs) / SECONDS_PER_WEEK;
 }
 
-/**
- * A site's take economics, in the SDK's own vocabulary.
- * **`reversionBps`, not `decayBps`.** The rename is recorded in `CLAUDE.md`: the mechanism is
- * bounded below by the publisher's floor, so it is mean reversion of the takeover price rather than
- * loss of value, and "decay" told users the wrong story about what holding a slot costs them. The
- * positional parameters of `computeTakePrice` keep the old names on purpose — they mirror
- * `Pricing.sol`'s signature exactly, and that correspondence is what the parity harness checks.
- */
+/** Site take economics (`reversionBps` maps to `computeTakePrice`'s `decayBps`). */
 export interface SiteEconomics {
   takeBps: bigint;
   payoutBps: bigint;
@@ -184,11 +145,7 @@ export interface SiteEconomics {
 
 export interface BuyBreakdown extends TakeQuote, Split {}
 
-/**
- * What a buy costs and where the money goes, composed from the same two primitives `SlotSite._buy`
- * composes and in the same order. This is what a confirm dialog should render — one call, so a UI
- * cannot show a price derived one way and a payout derived another.
- */
+/** Single-call quote and split matching `SlotSite._buy`. */
 export function computeBuyBreakdown(
   lastPrice: bigint,
   basePrice: bigint,

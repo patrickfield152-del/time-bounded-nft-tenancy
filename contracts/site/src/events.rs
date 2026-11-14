@@ -16,6 +16,7 @@
 //! - a timestamp field carries a `_ns` suffix because port state is
 //!   nanosecond-based, while configuration fields that the origin expressed in
 //!   seconds keep their `_secs` suffix and second units.
+//!
 //! Transcription table (origin name -> port variant, 39 rows):
 //! | # | origin file | origin event | port variant |
 //! |---|---|---|---|
@@ -59,8 +60,8 @@
 //! | 38 | origin factory | SiteCreated | `SiteCreated` |
 //! | 39 | Attestor | AttestorSet | `AttestorSet` |
 
-use near_sdk::json_types::{U128, U64};
-use near_sdk::{near, AccountId};
+use near_sdk::json_types::{U64, U128};
+use near_sdk::{AccountId, near};
 
 /// Every stele event, one NEP-297 `EVENT_JSON` log per emission.
 /// The `#[near(event_json(standard = "stele"))]` attribute supplies the
@@ -73,7 +74,6 @@ use near_sdk::{near, AccountId};
 #[near(event_json(standard = "stele"))]
 pub enum SteleEvent {
     // Site
-
     /// Origin `SlotBought`. Every sale, claim or take.
     /// `previous_owner` is `None` on a claim, where the origin recorded
     /// `address(0)`. `payer` is the account that funded the purchase (the
@@ -119,10 +119,7 @@ pub enum SteleEvent {
 
     /// Origin `AvailabilitySet`.
     #[event_version("1.0.0")]
-    AvailabilitySet {
-        token_id: String,
-        available: bool,
-    },
+    AvailabilitySet { token_id: String, available: bool },
 
     /// Origin `FloorSet`.
     #[event_version("1.0.0")]
@@ -143,50 +140,33 @@ pub enum SteleEvent {
 
     /// Origin `PayoutWithdrawn` (pull ledger).
     #[event_version("1.0.0")]
-    PayoutWithdrawn {
-        account: AccountId,
-        amount: U128,
-    },
+    PayoutWithdrawn { account: AccountId, amount: U128 },
 
     /// Origin `TreasurySet`.
     #[event_version("1.0.0")]
-    TreasurySet {
-        treasury: AccountId,
-    },
+    TreasurySet { treasury: AccountId },
 
     /// Origin `TreasurySwept`.
     #[event_version("1.0.0")]
-    TreasurySwept {
-        treasury: AccountId,
-        amount: U128,
-    },
+    TreasurySwept { treasury: AccountId, amount: U128 },
 
     /// Origin `PausedSet`.
     #[event_version("1.0.0")]
-    PausedSet {
-        paused: bool,
-    },
+    PausedSet { paused: bool },
 
     /// Origin `OpenRegistrationSet`.
     #[event_version("1.0.0")]
-    OpenRegistrationSet {
-        open: bool,
-        default_floor: U128,
-    },
+    OpenRegistrationSet { open: bool, default_floor: U128 },
 
     /// Origin `BaseTokenURISet`. Variant renamed `BaseTokenUriSet` to keep
     /// Rust's identifier casing; the emitted event name is
     /// `base_token_uri_set`.
     #[event_version("1.0.0")]
-    BaseTokenUriSet {
-        uri: String,
-    },
+    BaseTokenUriSet { uri: String },
 
     /// Origin `RoyaltySet`. Display-only royalty analog.
     #[event_version("1.0.0")]
-    RoyaltySet {
-        bps: u16,
-    },
+    RoyaltySet { bps: u16 },
 
     /// Origin `SiteInitialized`. `settlement_token` is `None` for native NEAR
     /// (the origin's `address(0)`).
@@ -229,7 +209,6 @@ pub enum SteleEvent {
     },
 
     // Rentals
-
     /// Origin `RentalListed`. The origin emitted a zero-rate record to signal
     /// a delisting; the port keeps that shape (`rate_per_day = 0`,
     /// `max_duration_secs = 0`).
@@ -279,7 +258,6 @@ pub enum SteleEvent {
     },
 
     // Escrow
-
     /// Origin `Bound` (origin escrow). Durations stay in seconds, as
     /// configured.
     #[event_version("1.0.0")]
@@ -319,24 +297,16 @@ pub enum SteleEvent {
 
     /// Origin `Withdrawn` (origin escrow pull ledger).
     #[event_version("1.0.0")]
-    Withdrawn {
-        account: AccountId,
-        amount: U128,
-    },
+    Withdrawn { account: AccountId, amount: U128 },
 
     /// Origin `MarkedDark` (origin escrow).
     #[event_version("1.0.0")]
-    MarkedDark {
-        at_ns: U64,
-    },
+    MarkedDark { at_ns: U64 },
 
     /// Origin `ClearedDark` (origin escrow). `dark_accrued_ns` is the dark
     /// duration that matured.
     #[event_version("1.0.0")]
-    ClearedDark {
-        at_ns: U64,
-        dark_accrued_ns: U64,
-    },
+    ClearedDark { at_ns: U64, dark_accrued_ns: U64 },
 
     /// Origin `ForeignSwept` (origin escrow).
     #[event_version("1.0.0")]
@@ -358,13 +328,9 @@ pub enum SteleEvent {
 
     /// Origin `ReserveWithdrawn` (origin escrow).
     #[event_version("1.0.0")]
-    ReserveWithdrawn {
-        to: AccountId,
-        amount: U128,
-    },
+    ReserveWithdrawn { to: AccountId, amount: U128 },
 
     // Factories / attestor
-
     /// Origin `EscrowedSiteCreated` (origin factory).
     #[event_version("1.0.0")]
     EscrowedSiteCreated {
@@ -385,10 +351,7 @@ pub enum SteleEvent {
 
     /// Origin `TokenAllowed` (origin factory).
     #[event_version("1.0.0")]
-    TokenAllowed {
-        token: AccountId,
-        allowed: bool,
-    },
+    TokenAllowed { token: AccountId, allowed: bool },
 
     /// Origin `SiteCreated` (origin factory).
     #[event_version("1.0.0")]
@@ -400,7 +363,5 @@ pub enum SteleEvent {
 
     /// Origin `AttestorSet` (Attestor registry).
     #[event_version("1.0.0")]
-    AttestorSet {
-        attestor: AccountId,
-    },
+    AttestorSet { attestor: AccountId },
 }

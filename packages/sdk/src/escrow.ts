@@ -1,12 +1,5 @@
 /**
- * The escrow vault: one vault per board, outside the site contract.
- * - A vault's income arrives by being the site's treasury. `sweep_treasury()`
- *   and `withdraw_for(vault)` are permissionless. `book()` moves the cut with
- *   two cross-contract calls; measure the result as a callback balance delta.
- * - `claimable` cannot be a local view. The origin read `slotOf`,
- *   `ownerOfOrZero`, `treasuryBalance` and `pendingWithdrawals(vault)` inside
- *   the vault. The vault caches those legs as `claimable_local`; `readClaimable`
- *   composes the cache with live legs and caps a claim at the last price.
+ * Escrow vault builders and views: one `vault` per board receives `sweep_treasury()` / `withdraw_for(vault)` via `book()`, and `readClaimable` joins `claimable_local` (`cached`, `claimable`, `slotOf`, `ownerOfOrZero`, `treasuryBalance`, `pendingWithdrawals(vault)`).
  */
 import { slotKey } from './keys';
 import { readView, type AccountId, type CallRequest, type Reader } from './near';
@@ -19,14 +12,7 @@ const ONE_YOCTO = '1';
 /** Non-payable methods: `book`, `release`, `claim`, `mark_dark` are all cranks. */
 const NO_DEPOSIT = '0';
 
-/**
- * Approves the vault to surrender one position, and tells it the approval id.
- * NEP-178 approves **per token**, not per collection: there is no `setApprovalForAll` on NEAR. The
- * `msg` is what makes the vault record `approval_id`, because `nft_approve` returns it to the
- * CALLER and the vault is not the caller — the site fires `nft_on_approve(token_id, owner_id,
- * approval_id, msg)` at the approved account, fire-and-forget, and the vault stores it.
- * A standing approval is not caller consent: `claim` still asserts the predecessor is the holder.
- */
+/** Approves vault to surrender a slot via NEP-178 `nft_approve` (no `setApprovalForAll`; `msg` triggers `nft_on_approve(token_id, owner_id, approval_id, msg)`). */
 export function buildApproveForVault(options: {
   site: AccountId;
   tokenId: string;
@@ -40,11 +26,7 @@ export function buildApproveForVault(options: {
   };
 }
 
-/**
- * Books everything the site currently owes the vault. `book()` on the vault is the crank; the
- * booking happens on the callback from its two cross-contract calls, so this request's own outcome
- * says nothing about how much was booked.
- */
+/** Cranks `book()` on the vault to sweep site balances and record a new deposit. */
 export function buildBook(options: { vault: AccountId }): CallRequest {
   return {
     contractId: options.vault,
@@ -54,10 +36,7 @@ export function buildBook(options: { vault: AccountId }): CallRequest {
   };
 }
 
-/**
- * Releases one mature deposit to its beneficiary. Maturity is evaluated as of `dark_since`, so a
- * deposit that had matured before the lights went out is the publisher's whatever a slow keeper did.
- */
+/** Releases one mature deposit to its beneficiary (evaluated as of `dark_since`). */
 export function buildRelease(options: { vault: AccountId; depositId: bigint | number }): CallRequest {
   const id = typeof options.depositId === 'number' ? BigInt(Math.trunc(options.depositId)) : options.depositId;
   if (id < 0n) throw new RangeError('stele/escrow: a deposit id cannot be negative');
@@ -69,13 +48,7 @@ export function buildRelease(options: { vault: AccountId; depositId: bigint | nu
   };
 }
 
-/**
- * Claims a position whose publisher has gone dark: three phases on the contract side — the same
- * two-call book, the guards, then a surrender of the token to the vault itself. Crediting happens
- * in a private callback, so a failed transfer credits nothing.
- * `minPaid` is the claimer's floor: the transaction reverts rather than surrendering a position for
- * less.
- */
+/** Surrenders a position during a dark episode (3-phase async claim on-chain; `minPaid` floor). */
 export function buildClaim(options: { vault: AccountId; tokenId: string; minPaid: Amount }): CallRequest {
   return {
     contractId: options.vault,
@@ -85,10 +58,7 @@ export function buildClaim(options: { vault: AccountId; tokenId: string; minPaid
   };
 }
 
-/**
- * Starts the dark clock. Factory-gated: the factory is the attestor's proxy, so this is called by
- * the factory after the attestor names the vault, never by the vault's own operator.
- */
+/** Starts the dark clock (called via factory/attestor). */
 export function buildMarkDark(options: { vault: AccountId }): CallRequest {
   return {
     contractId: options.vault,
@@ -144,11 +114,7 @@ interface DepositRecord {
   beneficiary: AccountId;
 }
 
-/**
- * Every deposit on a vault, with the vault's own maturity verdict beside each.
- * Read from the contract rather than recomputed here: the predicate decides both sides of every
- * dispute, and a TypeScript twin of it would be a second implementation with no shared vector.
- */
+/** Reads every vault deposit with the contract's maturity verdict. */
 export async function readDeposits(reader: Reader, vault: AccountId): Promise<VaultDeposit[]> {
   const count = await readView<number>(reader, vault, 'deposit_count');
   const ids = Array.from({ length: count }, (_, index) => index);
@@ -173,16 +139,7 @@ export async function readDeposits(reader: Reader, vault: AccountId): Promise<Va
   );
 }
 
-/**
- * What `claim` could drain from a vault for one position, and the four legs it is made of.
- * `cached` is the vault's own `claimable_local` — the site legs as they stood at the last book.
- * The three live legs are what a claim's own book will turn into a fresh, immature deposit before
- * the drain runs, which is why they count here even though the vault does not hold them yet.
- * `claimable` is `min(available, lastPrice)` and nothing more. It is deliberately not a prediction
- * that a claim will succeed: the dark clock, the claim delay, the once-per-episode rule and the
- * holder assertion are the contract's, and a client that reimplemented them would be a second
- * authority on when a board may be taken.
- */
+/** Claimable amount (`min(available, lastPrice)`) joined from vault cache and live site legs. */
 export interface Claimable {
   cached: bigint;
   siteTreasury: bigint;

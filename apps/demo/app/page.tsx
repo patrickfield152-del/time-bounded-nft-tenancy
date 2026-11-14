@@ -10,18 +10,7 @@ import {
 } from '@stele/sdk';
 import { Slot, SlotProvider, formatAmount } from '@stele/react';
 
-/**
- * The demo board, rendered from whatever the environment points at.
- *
- * Accounts come from `NEAR_*` (see `.env.example`) — there is no address in this file. The keys
- * below are this app's page structure, and they are also the on-chain token ids; floors are written
- * in the settlement asset's own units and parsed against the decimals `ft_metadata` reports, so the
- * same file works for a 6-decimal mock USD and for native NEAR.
- *
- * Server-rendered on every request: the first paint carries real owners and prices from
- * `readSlots`, and the client provider takes over for focus refetches. Nothing is cached, because a
- * board whose whole point is that positions change hands should not show a stale owner.
- */
+/** Server-rendered demo board driven by `NEAR_*` env vars (`.env.example`, `ft_metadata` 6 decimals, `readSlots`, no caching). */
 export const dynamic = 'force-dynamic';
 
 const BOARD = [
@@ -44,7 +33,11 @@ export default async function Page() {
   const network = readNetwork();
   const reader = readerFor(network);
 
-  const asset = await readSettlementAsset(reader, network.settlementFt);
+  const [asset, slots, terms] = await Promise.all([
+    readSettlementAsset(reader, network.settlementFt),
+    readSlots(reader, network.site, BOARD.map((slot) => slot.key)),
+    readSiteTerms(reader, network.site),
+  ]);
   const config = defineSite({
     name: 'stele demo',
     symbol: 'STELE',
@@ -53,11 +46,6 @@ export default async function Page() {
     decimals: asset.decimals,
     slots: BOARD.map((slot) => ({ key: slot.key, kind: slot.kind, floor: slot.floor })),
   });
-
-  const [slots, terms] = await Promise.all([
-    readSlots(reader, config.site, config.keys),
-    readSiteTerms(reader, config.site),
-  ]);
   const byKey = new Map<string, SlotState>(slots.map((slot) => [slot.key, slot]));
 
   return (

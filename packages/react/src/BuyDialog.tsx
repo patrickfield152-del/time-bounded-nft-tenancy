@@ -1,18 +1,6 @@
 'use client';
 
-/**
- * `<BuyDialog>` — the default confirm step.
- *
- * Deliberately unstyled and deliberately thin. Every real site will restyle or replace it, so the
- * value here is not the markup: it is that the numbers shown are the numbers `useBuy` builds the
- * transaction from, and that the two cannot drift. A site that writes its own dialog on `useBuy`
- * inherits that; a site that quotes separately from what it submits does not.
- *
- * **On NEAR there is no approval step.** The native path attaches the price to one call; the token
- * path is a single `ft_transfer_call` whose amount is the price. So the old "your wallet will ask
- * twice" warning is gone — a token purchase is one prompt, and saying otherwise would teach users
- * that a second prompt is expected.
- */
+/** Default `<BuyDialog>` UI; numbers come directly from `useBuy`. NEAR `ft_transfer_call` uses one prompt (no separate approval). */
 import { useEffect, type ReactNode } from 'react';
 import { DEFAULT_SLIPPAGE_BPS, type CallRequest } from '@stele/sdk';
 
@@ -23,10 +11,7 @@ export interface BuyDialogProps {
   slotId: string;
   open: boolean;
   onClose: () => void;
-  /**
-   * Receives the request built from the quote the user was actually shown. Omit and the dialog
-   * submits through `useNearWallet()` itself — the app-level wallet that `useBuy` already reads.
-   */
+  /** Custom submit handler; defaults to `useNearWallet()`. */
   onConfirm?: (request: CallRequest, quote: BuyQuote) => void | Promise<void>;
   /** Buy on someone else's behalf. Native settlement only — see `buildBuy`. */
   recipient?: string;
@@ -57,7 +42,7 @@ export function BuyDialog({
 
   return (
     <div role="dialog" aria-label={`Buy ${slotId}`}>
-      {phase === 'quoting' && <p>Reading the current price…</p>}
+      {phase === 'quoting' && <p>Quoting…</p>}
 
       {phase === 'error' && (
         <>
@@ -70,7 +55,7 @@ export function BuyDialog({
 
       {phase === 'confirmed' && (
         <>
-          <p role="status">Confirmed. The slot is yours once the transaction finalizes.</p>
+          <p role="status">Confirmed. Finalizing slot ownership.</p>
           <button type="button" onClick={onClose}>
             Close
           </button>
@@ -79,13 +64,7 @@ export function BuyDialog({
 
       {(phase === 'ready' || phase === 'submitting') && quote && (
         <>
-          {/*
-            On an ENCUMBERED position the headline number is `netCost`, not `charged`. The buyer
-            inherits the unaccrued rent, so `charged` alone tells them they are paying full price
-            for something they cannot use — when they are buying an asset that hands part of that
-            back over the remaining term. `charged` is still shown, because it is what leaves their
-            wallet and what the transaction is built from.
-          */}
+          {/* Headline `netCost` subtracts inherited unaccrued rent from `charged`. */}
           {quote.unaccruedRent > 0n ? (
             <>
               <p>
@@ -93,17 +72,13 @@ export function BuyDialog({
                 <strong>{formatAmount(quote.netCost, quote.currency)}</strong> net
               </p>
               <p>
-                You pay {formatAmount(quote.charged, quote.currency)} now and inherit{' '}
-                {formatAmount(quote.unaccruedRent, quote.currency)} of rent already escrowed on this
-                slot, which streams to you over the rest of the tenancy.
+                Pay {formatAmount(quote.charged, quote.currency)} now and inherit{' '}
+                {formatAmount(quote.unaccruedRent, quote.currency)} escrowed rent over the remaining term.
                 {quote.isFreeCarry
                   ? ' That is more than the purchase price: this position pays for itself.'
                   : ''}
               </p>
-              <p>
-                It is rented right now, so the tenant — not you — controls its content until the
-                term ends.
-              </p>
+              <p>Rented now: the tenant controls content until the term ends.</p>
             </>
           ) : (
             <p>
@@ -112,31 +87,22 @@ export function BuyDialog({
             </p>
           )}
 
-          {/*
-            What the payout guarantees, and what it does NOT. The payout is `payout_bps` of the
-            CURRENT effective floor, not of what the displaced holder paid; reversion separates the
-            two. The guarantee that survives every input is the floor one, so that is what this says.
-          */}
+          {/* Payout is `payout_bps` of current effective floor, not prior purchase price. */}
           {!quote.isClaim && (
             <p>
-              The current owner receives {formatAmount(quote.payout, quote.currency)} — never less
-              than this slot&rsquo;s floor, which is guaranteed. Whether it beats what they paid is
-              not: the payout tracks the slot&rsquo;s floor now, and a price that has reverted since
-              they bought can leave them below it.
+              Current owner receives {formatAmount(quote.payout, quote.currency)} (slot floor guaranteed; may be below prior price after reversion).
             </p>
           )}
 
-          <p>Anyone can take this slot from you later at a formula price. That is the mechanic.</p>
+          <p>Others may take this slot at the formula price.</p>
 
           {quote.settlementFt !== null && (
             <p>
-              Your wallet will ask once: a {quote.currency.symbol} transfer to the site for up to{' '}
-              {formatAmount(quote.charged, quote.currency)} plus a small margin in case the price
-              moves before your purchase lands.
+              Wallet prompt: {quote.currency.symbol} transfer up to {formatAmount(quote.charged, quote.currency)} plus slippage margin.
             </p>
           )}
 
-          {!signedAccountId && <p role="status">Connect a NEAR wallet to confirm.</p>}
+          {!signedAccountId && <p role="status">Connect wallet to confirm.</p>}
 
           <button
             type="button"

@@ -1,23 +1,7 @@
 'use client';
 
 /**
- * `useBuy` — the buy flow as state, with no UI attached.
- * Headless on purpose. `<BuyDialog>` is a thin default on top of this, and every real site will
- * restyle or replace it; the part that must not be reimplemented is the ordering below, because
- * getting it wrong is how a buyer signs terms they were never shown.
- * The ordering, and why each step is where it is:
- *   1. `readBuyContext` — quote, `encumbrance_hash` and the CHAIN's clock, all at one pinned block.
- *      Not three reads: a torn read across blocks means the buyer confirms a price from block N
- *      against terms from block N+1, and the anti-front-run guard is then guarding a state that
- *      never existed.
- *   2. Show the buyer that exact context and wait.
- *   3. Build from the SAME context that was displayed. Never re-read at submit time — a fresh read
- *      would pick up the very change `expected_terms` exists to reject, which is the one way to
- *      turn the guard into decoration.
- * **Signing is `near-connect-hooks`.** `submit` hands the built request to `useNearWallet()`'s
- * `callFunction`, which opens the user's wallet on exactly the call this quote produced. A site
- * that signs some other way passes its own handler to `buildRequest`'s output instead — the quote
- * and the request still come from here, so the numbers cannot drift from what was approved.
+ * `useBuy` — headless buy state for `<BuyDialog>` using `near-connect-hooks` (`useNearWallet()`, `callFunction`): 1. `readBuyContext` (`encumbrance_hash`); 2. display quote; 3. submit with `expected_terms` (`expectedTerms`).
  */
 import { useCallback, useState } from 'react';
 import {

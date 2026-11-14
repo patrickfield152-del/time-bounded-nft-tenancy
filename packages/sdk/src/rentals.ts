@@ -1,14 +1,5 @@
 /**
- * The TypeScript twin of the rent arithmetic in
- * `packages/websitekit-contracts/src/RentalsLib.sol`, spec section 2.
- * - Keep the operation order, truncation points and guard placement identical.
- *   The rule that governs `pricing.ts` governs this file. A cost the chain
- *   disagrees with reverts; an accrual it disagrees with shows wrong money.
- * - Use native `BigInt` only. `decimal.js` and `big.js` round differently from
- *   Solidity integer truncation and would be an unverified third party.
- * - `pricing.v2-parity.test.ts` sweeps every row through
- *   `script/GenV2Vectors.s.sol`, including checked-arithmetic reverts.
- *   Without guards, `BigInt` returns a plausible number the chain refuses.
+ * TypeScript parity twin of `packages/websitekit-contracts/src/RentalsLib.sol` (`pricing.ts`, `pricing.v2-parity.test.ts` / `script/GenV2Vectors.s.sol` via `BigInt` instead of `decimal.js`/`big.js`; `0` truncation).
  */
 
 import { BPS_DENOMINATOR, PricingOverflowError } from './pricing';
@@ -46,18 +37,7 @@ export interface Accrual {
   unaccrued: bigint;
 }
 
-/**
- * Mirrors `RentalsLib.accruedOf`. Linear accrual over the term, with no segment history — which is
- * what lets `extendRental` settle and restart with a single formula instead of a schedule.
- * `expiry === 0n` means **no tenancy**, not "a term that ended at the epoch", and it has to be
- * checked first: without that guard a cleared rental divides by zero rather than returning nothing.
- * The clamp `end = min(nowTs, expiry)` is what stops a term earning past its expiry, and it is also
- * what makes accrual reach exactly `prepaid` once the term has lapsed — the property `endRental`
- * relies on to drain escrow to zero, since it refuses to run any earlier.
- * @param nowTs Seconds since the epoch. Pass the CHAIN's timestamp where you have one; a wall-clock
- * `Date.now()/1000` drifts from it, and this function is the difference between two timestamps
- * rather than a duration, so the drift lands straight in the result.
- */
+/** Mirrors `RentalsLib.accruedOf`: linear accrual over `[start, expiry]` (`expiry === 0n` returns `0n`, `end = min(nowTs, expiry)` matches `extendRental`/`endRental`; pass chain `nowTs` not `Date.now()/1000`). */
 export function accruedOf(prepaid: bigint, start: bigint, expiry: bigint, nowTs: bigint): bigint {
   if (expiry === 0n) return 0n;
   const end = nowTs < expiry ? nowTs : expiry;
@@ -65,11 +45,7 @@ export function accruedOf(prepaid: bigint, start: bigint, expiry: bigint, nowTs:
   return mul(prepaid, end - start) / (expiry - start);
 }
 
-/**
- * Both legs at once. Prefer this to calling `accruedOf` and subtracting by hand: the identity
- * `accrued + unaccrued === prepaid` holds exactly, and computing the two independently is how a
- * caller ends up rendering a total that does not add up.
- */
+/** Returns `{ accrued, unaccrued }` where `accrued + unaccrued === prepaid` (`prepaid` / `accruedOf`). */
 export function accrual(prepaid: bigint, start: bigint, expiry: bigint, nowTs: bigint): Accrual {
   const accrued = accruedOf(prepaid, start, expiry, nowTs);
   return { accrued, unaccrued: sub(prepaid, accrued) };
@@ -95,20 +71,7 @@ export interface RentSplit {
   net: bigint;
 }
 
-/**
- * Mirrors `RentalsLib.rentSplit` — spec §2.5.
- * **Both cuts are keyed to the GROSS cost, so the two truncations are independent**, and `net` is
- * what remains after both rather than a third percentage of anything. Deriving it as a subtraction
- * is what makes the three legs sum to `cost` exactly — which is in turn what lets the contract's
- * escrow total reconcile against the sum of its live tenancies.
- * `feeBps` is the site's cut **as snapshotted on the listing**, not the site's current
- * `siteRentBps`. That distinction is the whole reason `siteRentBps` can be freely mutable (§2.5.1)
- * without letting a publisher advertise 0% and raise it before anyone rents — so read it from the
- * listing, never from site config.
- * Throws where the contract reverts, which here means any `protocolRentBps + feeBps > 10_000`. The
- * contract clamps the total to `[1_000, 4_000]` and re-checks it at list time; this does not
- * re-validate, so a caller inventing a split gets a throw rather than a number no site can produce.
- */
+/** Mirrors `RentalsLib.rentSplit` (§2.5, §2.5.1): keys `protocolRentBps + feeBps` (`[1_000, 4_000]`, max `10_000`, throws on `protocolRentBps + feeBps > 10_000`) to `cost` using listing `feeBps` (never `siteRentBps`), with `net` as remainder. */
 export function rentSplit(cost: bigint, protocolRentBps: bigint, feeBps: bigint): RentSplit {
   const protocolCut = mul(cost, protocolRentBps) / BPS_DENOMINATOR;
   const siteCut = mul(cost, feeBps) / BPS_DENOMINATOR;

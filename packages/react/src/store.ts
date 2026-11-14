@@ -1,16 +1,5 @@
 /**
- * Fetching content bytes and proving they are the right ones.
- * **The rule this file exists to enforce: unverified bytes never reach a render path.** `<Slot>`
- * must degrade to `fallback` on a fetch or hash-mismatch failure, and must never render unverified
- * bytes. That is stronger than it first sounds, and it is what rules out the obvious implementation
- * for images.
- * The obvious implementation is `<img src={gatewayUrl}>`. It is wrong: the browser fetches those
- * bytes and paints them without anyone ever checking them against the on-chain hash, so a
- * compromised or merely wrong gateway substitutes content silently on a page whose whole premise is
- * that content is verifiable. So images go through the same path as everything else — fetch,
- * verify, then hand the render layer bytes it can trust.
- * The cost is real and worth stating: no browser image cache across page loads, no progressive
- * decode, and a blob URL per image that has to be revoked. That is the price of the guarantee.
+ * Fetches content by hash and verifies sha256 before `<Slot>` renders; unverified bytes degrade to `fallback` (never `<img src={gatewayUrl}>`).
  */
 import {
   contentHashToCid,
@@ -26,11 +15,7 @@ export type ContentStatus =
   | { state: 'ready'; kind: number; payload: Uint8Array }
   | { state: 'failed'; reason: ContentFailure | 'fetch-failed' };
 
-/**
- * The chain will happily say a slot is owned and priced while its content 404s. `fetch-failed` is
- * that case, and it is deliberately distinct from `hash-mismatch`: one is a gateway problem the
- * site can fix, the other is a content problem it cannot.
- */
+/** `fetch-failed` = gateway error; `hash-mismatch` = content error. */
 export interface FetchContentOptions {
   contentUrl: (cid: string) => string;
   signal?: AbortSignal;
@@ -61,13 +46,7 @@ export async function fetchAndVerify(
   return { state: 'ready', kind: result.kind, payload: result.payload };
 }
 
-/**
- * Content is immutable under its hash, so it is cached by hash forever and never invalidated. An
- * edit produces a NEW hash, which is a cache miss by construction — there is no staleness to manage
- * and no revalidation to get wrong.
- * In-flight requests are deduped through the same map, so twelve slots sharing one headline issue
- * one fetch.
- */
+/** Immutable hash-keyed cache with in-flight request deduplication. */
 export class ContentStore {
   private readonly entries = new Map<ContentHash, ContentStatus>();
   private readonly inFlight = new Map<ContentHash, Promise<ContentStatus>>();

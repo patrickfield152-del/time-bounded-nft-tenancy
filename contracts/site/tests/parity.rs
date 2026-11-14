@@ -5,7 +5,7 @@
 //! generated once by `scripts/regen-vectors-from-origin.sh` and committed. A missing or empty file
 //! is a hard failure, never a skip: a vacuous pass is worse than a red test.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use primitive_types::U256;
@@ -30,7 +30,9 @@ fn read_jsonl<T: for<'de> Deserialize<'de>>(name: &str) -> Vec<T> {
     let rows: Vec<T> = text
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).unwrap_or_else(|e| panic!("bad row in {name}: {e}\n{line}")))
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("bad row in {name}: {e}\n{line}"))
+        })
         .collect();
     assert!(!rows.is_empty(), "{name} is empty");
     rows
@@ -41,7 +43,9 @@ fn dec(value: &str) -> U256 {
 }
 
 fn num(value: &str) -> u64 {
-    value.parse().unwrap_or_else(|_| panic!("not a u64: {value}"))
+    value
+        .parse()
+        .unwrap_or_else(|_| panic!("not a u64: {value}"))
 }
 
 // Price grid
@@ -103,17 +107,44 @@ fn price_grid_is_wide_and_has_both_row_classes() {
 
     let configs = rows
         .iter()
-        .map(|r| format!("{}/{}/{}/{}/{}", r.take_bps, r.payout_bps, r.decay_bps, r.max_decay_weeks, r.protocol_bps))
+        .map(|r| {
+            format!(
+                "{}/{}/{}/{}/{}",
+                r.take_bps, r.payout_bps, r.decay_bps, r.max_decay_weeks, r.protocol_bps
+            )
+        })
         .collect::<std::collections::BTreeSet<_>>();
-    assert!(configs.len() >= 12, "config space not swept: {} configs", configs.len());
+    assert!(
+        configs.len() >= 12,
+        "config space not swept: {} configs",
+        configs.len()
+    );
 
-    assert!(rows.iter().any(|r| r.take_bps == 30_000), "take clamp end missing");
-    assert!(rows.iter().any(|r| r.payout_bps == 10_000), "payout clamp end missing");
-    assert!(rows.iter().any(|r| r.decay_bps == 10_000), "decay clamp end missing");
+    assert!(
+        rows.iter().any(|r| r.take_bps == 30_000),
+        "take clamp end missing"
+    );
+    assert!(
+        rows.iter().any(|r| r.payout_bps == 10_000),
+        "payout clamp end missing"
+    );
+    assert!(
+        rows.iter().any(|r| r.decay_bps == 10_000),
+        "decay clamp end missing"
+    );
     assert!(rows.iter().any(|r| r.decay_bps == 1), "decay floor missing");
-    assert!(rows.iter().any(|r| r.max_decay_weeks == 0), "zero-week clamp missing");
-    assert!(rows.iter().any(|r| r.max_decay_weeks == 52), "week clamp end missing");
-    assert!(rows.iter().any(|r| r.protocol_bps == 0), "zero protocol row missing");
+    assert!(
+        rows.iter().any(|r| r.max_decay_weeks == 0),
+        "zero-week clamp missing"
+    );
+    assert!(
+        rows.iter().any(|r| r.max_decay_weeks == 52),
+        "week clamp end missing"
+    );
+    assert!(
+        rows.iter().any(|r| r.protocol_bps == 0),
+        "zero protocol row missing"
+    );
 
     let overflow = rows.iter().filter(|r| r.overflow).count();
     assert!(overflow > 0, "no overflow rows");
@@ -127,7 +158,10 @@ fn price_and_effective_floor_match_every_computable_row() {
 
     for row in rows.iter().filter(|r| !r.overflow) {
         let quote = quote(row);
-        let expected_price = row.price.as_deref().unwrap_or_else(|| panic!("missing price — {}", describe(row)));
+        let expected_price = row
+            .price
+            .as_deref()
+            .unwrap_or_else(|| panic!("missing price — {}", describe(row)));
         let expected_floor = row
             .effective_floor
             .as_deref()
@@ -157,7 +191,8 @@ fn claim_and_take_splits_match_every_computable_row() {
     for row in rows.iter().filter(|r| !r.overflow) {
         let quote = quote(row);
         for (branch, expected) in [("claim", row.claim.as_ref()), ("take", row.take.as_ref())] {
-            let expected = expected.unwrap_or_else(|| panic!("missing {branch} split — {}", describe(row)));
+            let expected =
+                expected.unwrap_or_else(|| panic!("missing {branch} split — {}", describe(row)));
             let is_unclaimed = branch == "claim";
             let split = compute_split(
                 quote.effective_floor,
@@ -166,15 +201,30 @@ fn claim_and_take_splits_match_every_computable_row() {
                 row.payout_bps,
                 row.protocol_bps,
             );
-            assert_eq!(split.charged.to_string(), expected.charged, "{branch} charged — {}", describe(row));
-            assert_eq!(split.payout.to_string(), expected.payout, "{branch} payout — {}", describe(row));
+            assert_eq!(
+                split.charged.to_string(),
+                expected.charged,
+                "{branch} charged — {}",
+                describe(row)
+            );
+            assert_eq!(
+                split.payout.to_string(),
+                expected.payout,
+                "{branch} payout — {}",
+                describe(row)
+            );
             assert_eq!(
                 split.protocol_cut.to_string(),
                 expected.protocol,
                 "{branch} protocol — {}",
                 describe(row)
             );
-            assert_eq!(split.site_cut.to_string(), expected.site, "{branch} site — {}", describe(row));
+            assert_eq!(
+                split.site_cut.to_string(),
+                expected.site,
+                "{branch} site — {}",
+                describe(row)
+            );
         }
     }
 }
@@ -189,12 +239,28 @@ fn overflow_rows_revert_exactly_where_solidity_does() {
         let reverted = catch_unwind(AssertUnwindSafe(|| {
             let quote = quote(row);
             // The generator marks a row overflowing when either the quote or either split reverts.
-            let _ = compute_split(quote.effective_floor, quote.price, true, row.payout_bps, row.protocol_bps);
-            let _ = compute_split(quote.effective_floor, quote.price, false, row.payout_bps, row.protocol_bps);
+            let _ = compute_split(
+                quote.effective_floor,
+                quote.price,
+                true,
+                row.payout_bps,
+                row.protocol_bps,
+            );
+            let _ = compute_split(
+                quote.effective_floor,
+                quote.price,
+                false,
+                row.payout_bps,
+                row.protocol_bps,
+            );
         }))
         .is_err();
 
-        assert!(reverted, "port returned a value where Solidity reverted — {}", describe(row));
+        assert!(
+            reverted,
+            "port returned a value where Solidity reverted — {}",
+            describe(row)
+        );
     }
 }
 
@@ -308,22 +374,49 @@ fn v2_grid_covers_all_three_families_and_their_boundaries() {
     assert!(rents.len() > 100, "rent family too small: {}", rents.len());
     assert!(fees.len() > 50, "fee family too small: {}", fees.len());
 
-    assert!(asks.iter().any(|r| r.ask_floor == "0"), "askFloor==0 fall-through missing");
-    assert!(asks.iter().any(|r| r.max_ask_bps == 10_000), "maxAskBps floor missing");
-    assert!(rents.iter().any(|r| r.expiry == "0"), "no-tenancy row missing");
-    assert!(rents.iter().any(|r| r.expiry != "0" && dec(&r.now_ts) < dec(&r.expiry)), "pre-expiry row missing");
-    assert!(rents.iter().any(|r| r.expiry != "0" && dec(&r.now_ts) > dec(&r.expiry)), "post-expiry row missing");
     assert!(
-        fees.iter().any(|r| r.protocol_rent_bps + r.fee_bps == 1_000),
+        asks.iter().any(|r| r.ask_floor == "0"),
+        "askFloor==0 fall-through missing"
+    );
+    assert!(
+        asks.iter().any(|r| r.max_ask_bps == 10_000),
+        "maxAskBps floor missing"
+    );
+    assert!(
+        rents.iter().any(|r| r.expiry == "0"),
+        "no-tenancy row missing"
+    );
+    assert!(
+        rents
+            .iter()
+            .any(|r| r.expiry != "0" && dec(&r.now_ts) < dec(&r.expiry)),
+        "pre-expiry row missing"
+    );
+    assert!(
+        rents
+            .iter()
+            .any(|r| r.expiry != "0" && dec(&r.now_ts) > dec(&r.expiry)),
+        "post-expiry row missing"
+    );
+    assert!(
+        fees.iter()
+            .any(|r| r.protocol_rent_bps + r.fee_bps == 1_000),
         "rent band lower end missing"
     );
     assert!(
-        fees.iter().any(|r| r.protocol_rent_bps + r.fee_bps == 4_000),
+        fees.iter()
+            .any(|r| r.protocol_rent_bps + r.fee_bps == 4_000),
         "rent band upper end missing"
     );
     assert!(fees.iter().any(|r| r.fee_bps == 0), "zero site fee missing");
-    assert!(fees.iter().any(|r| r.protocol_rent_bps == 0), "zero protocol rent missing");
-    assert!(fees.iter().any(|r| r.cost.as_deref() == Some("0")), "zero-cost dust row missing");
+    assert!(
+        fees.iter().any(|r| r.protocol_rent_bps == 0),
+        "zero protocol rent missing"
+    );
+    assert!(
+        fees.iter().any(|r| r.cost.as_deref() == Some("0")),
+        "zero-cost dust row missing"
+    );
 
     for (name, count, overflow, computable) in [
         (
@@ -357,8 +450,14 @@ fn ask_rows_match_the_reversion_base_ceiling_and_quote() {
 
     for row in asks.iter().filter(|r| !r.overflow) {
         let base = pricing::resolve_reversion_base(dec(&row.ask_floor), dec(&row.last_price));
-        let ceiling = pricing::ask_ceiling(dec(&row.last_price), dec(&row.base_price), row.max_ask_bps);
-        assert_eq!(base.to_string(), row.reversion_base.as_deref().unwrap(), "base — {}", describe_ask(row));
+        let ceiling =
+            pricing::ask_ceiling(dec(&row.last_price), dec(&row.base_price), row.max_ask_bps);
+        assert_eq!(
+            base.to_string(),
+            row.reversion_base.as_deref().unwrap(),
+            "base — {}",
+            describe_ask(row)
+        );
         assert_eq!(
             ceiling.to_string(),
             row.ask_ceiling.as_deref().unwrap(),
@@ -367,7 +466,12 @@ fn ask_rows_match_the_reversion_base_ceiling_and_quote() {
         );
 
         let quote = ask_quote(row);
-        assert_eq!(quote.price.to_string(), row.price.as_deref().unwrap(), "price — {}", describe_ask(row));
+        assert_eq!(
+            quote.price.to_string(),
+            row.price.as_deref().unwrap(),
+            "price — {}",
+            describe_ask(row)
+        );
         assert_eq!(
             quote.effective_floor.to_string(),
             row.effective_floor.as_deref().unwrap(),
@@ -381,7 +485,10 @@ fn ask_rows_match_the_reversion_base_ceiling_and_quote() {
 #[test]
 fn unset_ask_leaves_pricing_untouched() {
     let (asks, _, _) = v2_rows();
-    let unset: Vec<&AskRow> = asks.iter().filter(|r| r.ask_floor == "0" && !r.overflow).collect();
+    let unset: Vec<&AskRow> = asks
+        .iter()
+        .filter(|r| r.ask_floor == "0" && !r.overflow)
+        .collect();
     assert!(!unset.is_empty(), "no unset-ask rows");
 
     for row in unset {
@@ -421,8 +528,18 @@ fn rent_accrual_matches_both_legs() {
         let accrued = rentals::accrued_of(prepaid, start, expiry, now);
         let both = accrual(prepaid, start, expiry, now);
 
-        assert_eq!(accrued.to_string(), row.accrued.as_deref().unwrap(), "accrued — {}", describe_rent(row));
-        assert_eq!(both.accrued, accrued, "accrual/accrued_of disagree — {}", describe_rent(row));
+        assert_eq!(
+            accrued.to_string(),
+            row.accrued.as_deref().unwrap(),
+            "accrued — {}",
+            describe_rent(row)
+        );
+        assert_eq!(
+            both.accrued,
+            accrued,
+            "accrual/accrued_of disagree — {}",
+            describe_rent(row)
+        );
         assert_eq!(
             both.unaccrued.to_string(),
             row.unaccrued.as_deref().unwrap(),
@@ -444,7 +561,12 @@ fn fee_rows_match_cost_and_split() {
 
     for row in fees.iter().filter(|r| !r.overflow) {
         let cost = rent_cost(dec(&row.rate_per_day), num(&row.duration_secs));
-        assert_eq!(cost.to_string(), row.cost.as_deref().unwrap(), "cost — {}", describe_fee(row));
+        assert_eq!(
+            cost.to_string(),
+            row.cost.as_deref().unwrap(),
+            "cost — {}",
+            describe_fee(row)
+        );
 
         let split = rent_split(cost, row.protocol_rent_bps, row.fee_bps);
         assert_eq!(
@@ -453,8 +575,18 @@ fn fee_rows_match_cost_and_split() {
             "protocol cut — {}",
             describe_fee(row)
         );
-        assert_eq!(split.site_cut.to_string(), row.site_cut.as_deref().unwrap(), "site cut — {}", describe_fee(row));
-        assert_eq!(split.net.to_string(), row.net.as_deref().unwrap(), "net — {}", describe_fee(row));
+        assert_eq!(
+            split.site_cut.to_string(),
+            row.site_cut.as_deref().unwrap(),
+            "site cut — {}",
+            describe_fee(row)
+        );
+        assert_eq!(
+            split.net.to_string(),
+            row.net.as_deref().unwrap(),
+            "net — {}",
+            describe_fee(row)
+        );
         assert_eq!(
             split.protocol_cut + split.site_cut + split.net,
             cost,
@@ -470,7 +602,8 @@ fn v2_overflow_rows_revert_exactly_where_solidity_does() {
 
     for row in asks.iter().filter(|r| r.overflow) {
         let reverted = catch_unwind(AssertUnwindSafe(|| {
-            let _ = pricing::ask_ceiling(dec(&row.last_price), dec(&row.base_price), row.max_ask_bps);
+            let _ =
+                pricing::ask_ceiling(dec(&row.last_price), dec(&row.base_price), row.max_ask_bps);
             let _ = ask_quote(row);
         }))
         .is_err();

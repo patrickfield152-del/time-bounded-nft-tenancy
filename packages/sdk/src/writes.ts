@@ -1,15 +1,6 @@
 /**
- * Transaction builders: the write half of the SDK.
- * - Every function returns a `CallRequest`. It does not send. `submit` from
- *   `./near` is the script path; `toWalletCall` is the browser path.
- * - `expectedTerms` is required on every buy. Read it with `readBuyContext`
- *   or `readEncumbrance` in its own step, then pass it in.
- * - `settlementFt` is required on every builder that moves money. Pass
- *   `readSiteTerms().settlementFt`. There is no default.
- * - The token path is `ft_transfer_call`, not an approval. NEP-141 has no
- *   allowance. The buyer calls the token once with a JSON `msg`. The site's
- *   `ft_on_transfer` dispatches on `action` and sees `sender_id` as payer.
- *   `buy_for` exists only on the native path.
+ * Transaction builders returning `CallRequest` (send via `submit` from `./near` or `toWalletCall`).
+ * Buyers pass `expectedTerms` (`readBuyContext` / `readEncumbrance`) and `settlementFt` (`readSiteTerms().settlementFt`); `ft_transfer_call` passes JSON `msg` (`action`, `sender_id` in `ft_on_transfer`).
  */
 import { assertContentHash } from './content';
 import { jsonU64, NS_PER_SECOND } from './wire';
@@ -18,20 +9,10 @@ import { type AccountId, type CallRequest } from './near';
 import { toU128, type Amount, type U128 } from './settlement';
 import type { BuyContext } from './reads';
 
-/**
- * How long a buy stays valid after it is built. Short, because the whole point of a deadline is
- * that a transaction stuck through a price move should expire rather than land at a price nobody
- * agreed to. Measured in NANOSECONDS against `block_timestamp()`.
- */
+/** Buy deadline window in seconds (compared in nanoseconds against `block_timestamp()`). */
 export const DEFAULT_DEADLINE_SECS = 300n;
 
-/**
- * Slippage headroom applied to the quoted price when the caller does not supply an explicit
- * `max_price`.
- * Zero would be correct and unusable: the quote is read a block or two before the transaction
- * lands, and any reversion boundary crossed in between changes the number. 1% is enough to absorb
- * ordinary drift and far too little to absorb a take, which costs at least 1.4x.
- */
+/** Default slippage headroom above quoted price (100 bps = 1%). */
 export const DEFAULT_SLIPPAGE_BPS = 100n;
 
 /** The one-yocto guard most owner-only methods assert, and the only deposit they accept. */
@@ -40,11 +21,7 @@ const ONE_YOCTO = '1';
 const NO_DEPOSIT = '0';
 
 
-/**
- * A `u64` field of a call: an integer that stays exact as a JSON number.
- * The shared helper (`jsonU64`) throws the same `RangeError` shape; this
- * wrapper keeps the non-negative and integer-only checks writes insists on.
- */
+/** Validates non-negative integer `u64` wire field (`jsonU64`, `RangeError`). */
 function toU64(value: bigint | number, field: string): number {
   if (typeof value === 'number' && !Number.isInteger(value)) {
     throw new RangeError(`stele/writes: ${field} must be an integer, got ${value}`);
@@ -54,13 +31,7 @@ function toU64(value: bigint | number, field: string): number {
   return exact;
 }
 
-/**
- * A nanosecond timestamp as the JSON number `deadline_ns` expects.
- * Current epoch nanoseconds exceed `Number.MAX_SAFE_INTEGER`, so the value carries up to ~256 ns of
- * double rounding. That is stated rather than hidden: a deadline is compared against a block
- * timestamp and is minutes away, so 256 ns is eight orders of magnitude below anything that could
- * change the outcome.
- */
+/** Nanosecond timestamp as JSON number for `deadline_ns` (exceeds `Number.MAX_SAFE_INTEGER` with ~256 ns rounding). */
 function nsToJson(value: bigint): number {
   if (value < 0n) throw new RangeError('stele/writes: a deadline cannot be negative');
   return Number(value);
@@ -87,8 +58,8 @@ function bpsOf(amount: bigint, bps: bigint): bigint {
   return (amount * bps) / 10_000n;
 }
 
-/** `max(charged, charged + slippage)` with the guard the contract would otherwise revert on. */
-function resolveMaxPrice(
+/** `max(charged, charged + slippage)` with contract-matching non-negative guards. */
+function capPrice(
   charged: Amount,
   maxPrice?: Amount,
   slippageBps: bigint = DEFAULT_SLIPPAGE_BPS,
@@ -105,8 +76,8 @@ function resolveMaxPrice(
   return toU128(resolved);
 }
 
-/** The `deadline_ns` for a call, from a chain clock or an explicit absolute value. */
-function resolveDeadline(nowNs: bigint, deadlineNs?: bigint, deadlineSecs?: bigint): number {
+/** `deadline_ns` from chain clock or explicit value. */
+function dueNs(nowNs: bigint, deadlineNs?: bigint, deadlineSecs?: bigint): number {
   if (deadlineNs !== undefined) return nsToJson(deadlineNs);
   const span = deadlineSecs ?? DEFAULT_DEADLINE_SECS;
   if (span < 0n) throw new RangeError('stele/writes: a deadline cannot be in the past');
@@ -182,8 +153,8 @@ export interface BuildBuyOptions {
  */
 export function buildBuy(options: BuildBuyOptions): CallRequest {
   const tokenId = slotKey(options.tokenId);
-  const maxPrice = resolveMaxPrice(options.charged, options.maxPrice, options.slippageBps);
-  const deadlineNs = resolveDeadline(options.nowNs, options.deadlineNs, options.deadlineSecs);
+  const maxPrice = capPrice(options.charged, options.maxPrice, options.slippageBps);
+  const deadlineNs = dueNs(options.nowNs, options.deadlineNs, options.deadlineSecs);
 
   const topUp = options.storageTopUp === undefined ? 0n : BigInt(toU128(options.storageTopUp));
   if (options.settlementFt === null) {
@@ -242,14 +213,7 @@ export function buildBuyFor(options: BuildBuyOptions & { recipient: AccountId })
   return buildBuy(options);
 }
 
-/**
- * The path to reach for. Takes a `BuyContext` — quote, encumbrance and chain clock all read at one
- * pinned block — so the ways a buy can be built wrong are unavailable by construction.
- * @example
- * const terms = await readSiteTerms(reader, site);
- * const context = await readBuyContext(reader, site, 'hero.headline');
- * const request = buildBuyFrom(site, context, terms.settlementFt);
- */
+/** Builds a `buy` or `buy_for` from a pinned-block `BuyContext`. */
 export function buildBuyFrom(
   site: AccountId,
   context: Pick<BuyContext, 'slot' | 'expectedTerms' | 'nowNs'>,
@@ -561,15 +525,8 @@ const ONE_DAY = 86_400n;
 const SEVEN_DAYS = 604_800n;
 const ONE_YEAR = 31_536_000n;
 
-/**
- * The clamps below duplicate the contract on purpose. This is the one place in the SDK where
- * duplicating a contract rule is right. The contract's version is the authority, and it reverts.
- * But a revert here costs a deploy transaction and returns an error name, not a sentence.
- * The protocol legs are NOT checked. They are the factory's state, supplied by its own `new`. A
- * client that invented them would validate against numbers that the deployment never agreed to.
- * `take_bps > payout_bps + protocol_bps` is therefore enforced where it can be: on chain.
- */
-function assertSiteConfig(options: SiteConfigOptions): void {
+/** Client-side mirror of `SiteConfig` clamps (`take_bps > payout_bps + protocol_bps` is checked on-chain). */
+function chkCfg(options: SiteConfigOptions): void {
   const { economics, rentals, floorPolicy } = options;
   const fail = (message: string): never => {
     throw new InvalidEconomicsError(message);
@@ -593,17 +550,14 @@ function assertSiteConfig(options: SiteConfigOptions): void {
   if (floorPolicy.maxAskBps < 10_000n) fail('maxAskBps must be at least 10_000 so an ask can always cover the last price');
 }
 
-/**
- * The `SiteConfig` struct, the slots' keys and the floors, checked against the contract's clamps.
- * This is the one implementation behind `buildCreateSite`.
- */
+/** Validates and encodes `SiteConfig`, slot keys, and floors. */
 export function siteConfigOf(options: SiteConfigOptions): {
   config: SiteConfigArgs;
   keys: string[];
   floors: U128[];
 } {
   const { economics, rentals, floorPolicy, slots = {} } = options;
-  assertSiteConfig(options);
+  chkCfg(options);
 
   const names = Object.keys(slots);
   const keys = slotKeys(names);
@@ -628,16 +582,7 @@ export function siteConfigOf(options: SiteConfigOptions): {
   };
 }
 
-/**
- * Builds `create_site` or `create_site_for`.
- * The factory creates the account, deploys the site wasm and calls `new` in one batch; the deposit
- * must cover the account's state and its code storage, which is why it is a required argument read
- * from the factory rather than a constant here.
- * Two settings a deployment wants are deliberately absent: `new` starts a site closed, with
- * `default_floor = min_slot_floor` and a zero display royalty. Open registration, the default floor
- * and the royalty are owner calls on the created site (`set_open_registration`,
- * `set_royalty`), and the deploy script issues them in the same batch after the create returns.
- */
+/** Builds `create_site` or `create_site_for`; `deposit` covers site state and code storage (`set_open_registration`, `set_royalty` follow). */
 export function buildCreateSite(options: BuildCreateSiteOptions): CallRequest {
   const { config, keys, floors } = siteConfigOf(options);
   const args: Record<string, unknown> = {

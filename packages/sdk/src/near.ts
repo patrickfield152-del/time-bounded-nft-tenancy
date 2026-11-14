@@ -1,12 +1,5 @@
 /**
- * Chain plumbing: one JSON-RPC reader and an `Account` only where signing is needed.
- * - A read never needs a key. `readerFromEnv()` and `readerFromUrl()` return
- *   a plain `near-api-js` provider. A page cannot accidentally sign.
- * - A write is a value, not a side effect. `CallRequest` holds the contract,
- *   method, JSON args and deposit. Apps reshape it with `toWalletCall` for
- *   `@hot-labs/near-connect`'s `callFunction`. Scripts pass it to `submit`.
- * - The RPC URL comes from the caller. One build serves testnet, mainnet and
- *   a local sandbox.
+ * Chain plumbing: JSON-RPC `Reader` (`readerFromEnv()`, `readerFromUrl()`), failover provider, and `CallRequest` (`toWalletCall` for `@hot-labs/near-connect`'s `callFunction`, `submit` for scripts).
  */
 import {
   Account,
@@ -24,11 +17,7 @@ export type AccountId = string;
 /** A block to pin a view to: `{ blockId }` or `{ finality }`. Re-exported for callers. */
 export type QueryBlock = BlockReference;
 
-/**
- * The read surface every function in this package takes.
- * Structural on purpose: any object with the two provider methods works, so a test can pass a
- * hand-rolled reader, a browser can pass a wallet's provider, and a server can pass `readerFromEnv()`.
- */
+/** Read-only RPC surface (`callFunction`, `viewBlock`) for browsers, servers, and tests. */
 export type Reader = Pick<JsonRpcProvider, 'callFunction' | 'viewBlock'>;
 
 /**
@@ -66,11 +55,7 @@ export class MissingEnvError extends Error {
 /** NEAR account ids are 2..64 characters of lowercase alphanumerics, `-`, `_` and `.` separators. */
 const ACCOUNT_ID_PATTERN = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
-/**
- * Rejects an account id before it becomes an RPC error.
- * Worth a local check: a typo in `NEAR_SITE_ACCOUNT` otherwise surfaces as `AccountDoesNotExist`
- * from a node, which reads like a deployment problem rather than a configuration one.
- */
+/** Validates `NEAR_SITE_ACCOUNT` format locally before RPC (`AccountDoesNotExist`). */
 export function assertValidAccountId(accountId: string): void {
   if (accountId.length < 2 || accountId.length > 64 || !ACCOUNT_ID_PATTERN.test(accountId)) {
     throw new RangeError(`stele/near: "${accountId}" is not a NEAR account id`);
@@ -94,13 +79,7 @@ export function readerFromUrl(rpcUrl: string): Reader {
   return new JsonRpcProvider({ url: rpcUrl });
 }
 
-/**
- * A reader for one or more endpoints.
- * Two or more URLs use near-api-js's native `FailoverRpcProvider`, which walks
- * the list in order and keeps the last provider that answered; this replaces a
- * hand-rolled retry loop and its provider selection state. One URL is the same
- * `JsonRpcProvider` `readerFromUrl` returns.
- */
+/** Failover `Reader` (`FailoverRpcProvider` for multiple URLs; `JsonRpcProvider` for one `readerFromUrl`). */
 export function readerFromUrls(rpcUrls: readonly string[]): Reader {
   const urls = rpcUrls.map((url) => url.trim()).filter((url) => url !== '');
   if (urls.length === 0) {
@@ -110,11 +89,7 @@ export function readerFromUrls(rpcUrls: readonly string[]): Reader {
   return new FailoverRpcProvider(urls.map((url) => new JsonRpcProvider({ url })));
 }
 
-/**
- * The ambient environment when the runtime has one. Read through `globalThis`
- * so a browser build has no `process` reference: it sees an empty map and every
- * `requiredEnv` call reports the variable it wanted.
- */
+/** Reads `process.env` via `globalThis` (`process` absent in browsers) so `requiredEnv` reports missing keys. */
 export function runtimeEnv(): Record<string, string | undefined> {
   const runtime = globalThis as {
     process?: { env?: Record<string, string | undefined> };
@@ -147,14 +122,7 @@ export function accountFromKey(options: {
   return new Account(options.accountId, options.rpcUrl, options.privateKey);
 }
 
-/**
- * An account that signs with several keys, rotating them through near-api-js's
- * native `MultiKeySigner`.
- * The keys must all be full-access keys on the same account; the signer picks
- * the key per transaction, so parallel submissions get independent nonce lanes
- * without local nonce bookkeeping. Use throwaway keys on any network that holds
- * value.
- */
+/** Signing `Account` rotating throwaway full-access keys via native `MultiKeySigner`. */
 export function accountFromKeys(options: {
   accountId: AccountId;
   privateKeys: readonly KeyPairString[];
@@ -238,11 +206,7 @@ export async function readClock(reader: Reader): Promise<ChainClock> {
 /** 30 TGas, the same default wallet adapters use, for calls that do not set their own. */
 export const DEFAULT_GAS = 30_000_000_000_000n;
 
-/**
- * Signs and submits one request with a local account, waiting for final execution.
- * For scripts and the sandbox harness. A browser app should hand `toWalletCall(request)` to the
- * wallet instead, so the user sees what they are approving.
- */
+/** Signs and submits a `CallRequest` with a local `Account` (browsers pass `toWalletCall(request)`). */
 export async function submit(account: Account, request: CallRequest) {
   return account.signAndSendTransaction({
     receiverId: request.contractId,

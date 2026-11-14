@@ -1,14 +1,5 @@
 /**
- * What a site's money is, and how an amount crosses the wire.
- * - Wire amounts are decimal strings. `u128` in JSON is a string type
- *   (`U128`) or a number. 10^24 yocto per NEAR exceeds
- *   `Number.MAX_SAFE_INTEGER`; a JavaScript number rounds in silence.
- * - `toU128` and `fromU128` are the only conversions. They throw on a
- *   negative, a fraction, or an out-of-range value.
- * - Native NEAR has 24 decimals; a 6-decimal mock FT differs by 18 orders of
- *   magnitude. `readSettlementAsset` reads `ft_metadata` for a token site and
- *   returns the fixed native description otherwise.
- * - The settlement account comes from `terms()` or `NEAR_FT_ACCOUNT`.
+ * Settlement units: exact `U128` decimal strings (`toU128`, `fromU128`), `parseUnits`/`formatUnits`, and `readSettlementAsset` (`ft_metadata` or 24-decimal NEAR vs 6-decimal FT, using `terms()` / `NEAR_FT_ACCOUNT`).
  */
 import { readView, type AccountId, type Reader } from './near';
 import { nearToYocto } from 'near-api-js';
@@ -17,22 +8,14 @@ export { nearToYocto };
 /** A `u128` in its wire form: a decimal string between `0` and `2^128 - 1`. */
 export type U128 = string;
 
-/**
- * What a builder accepts where money is involved: base units as a `bigint` (what every read and
- * every pricing twin returns) or already in wire form. Never a `number` — a `number` is the one
- * representation that rounds.
- */
+/** Base units as `bigint` or `U128` wire string (never `number`, which rounds `10^24` past `Number.MAX_SAFE_INTEGER`). */
 export type Amount = U128 | bigint;
 
 const U128_MAX = (1n << 128n) - 1n;
 
 const DECIMAL_PATTERN = /^([+-]?)(\d+)(?:\.(\d+))?$/;
 
-/**
- * Narrows a value to `U128`.
- * `number` is accepted only as an integer, because `0.1` has no exact `bigint` and a fractional
- * amount is always a units mistake rather than a rounding preference.
- */
+/** Encodes integer/bigint/string base units as `U128` (rejects `0.1` fractions). */
 export function toU128(value: bigint | string | number): U128 {
   let parsed: bigint;
   if (typeof value === 'bigint') {
@@ -61,11 +44,7 @@ export function fromU128(value: U128): bigint {
   return BigInt(value);
 }
 
-/**
- * A human decimal amount into integer base units, exactly.
- * `parseUnits('1.5', 6)` is `1_500_000n`. Never multiplies by a float: the whole point of the
- * strict pattern is that `0.29 * 1e18` is not `290000000000000000` in JavaScript.
- */
+/** Parses decimal string into base units without floats (`parseUnits('1.5', 6)` = `1_500_000n`; avoids `0.29 * 1e18` -> `290000000000000000` float drift at 18 decimals). */
 export function parseUnits(amount: string, decimals: number): bigint {
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
     throw new RangeError(`stele/settlement: ${decimals} is not a decimal count in 0..36`);
@@ -102,13 +81,7 @@ export function formatUnits(value: bigint, decimals: number): string {
 
 
 
-/**
- * NEP-145 `storage_balance_bounds().min` on a site: 0.007 NEAR.
- * A mint into a fresh account has to fund at least this much, and a native buy attaches it as a
- * top-up that the site routes into its own generated `storage_deposit` before minting. Only a first
- * purchase into an unfunded wallet needs it; the contract refunds what it does not use to the
- * payer's pull ledger.
- */
+/** NEP-145 `storage_balance_bounds().min` on a site (`0.007 NEAR`), attached as top-up to `storage_deposit` and refunded on overpay. */
 export const MIN_STORAGE_TOP_UP: bigint = nearToYocto('0.007');
 
 /** What a site's prices are counted in. `accountId: null` means native NEAR. */
@@ -133,12 +106,7 @@ interface FtMetadataView {
   decimals: number;
 }
 
-/**
- * The asset a site's prices are denominated in.
- * For a token site this is one `ft_metadata` call — the only way to know a token's decimals, and
- * the reason `min_slot_floor` is supplied at deploy time rather than discovered: `new` cannot await
- * an asynchronous read. For native settlement it is the constant, with no round trip.
- */
+/** Reads NEP-148 `ft_metadata` (`new` cannot await async reads for `min_slot_floor`) or returns `NATIVE_NEAR` when `tokenAccount` is `null`. */
 export async function readSettlementAsset(
   reader: Reader,
   tokenAccount: AccountId | null,

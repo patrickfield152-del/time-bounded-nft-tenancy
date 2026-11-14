@@ -1,11 +1,5 @@
 /**
- * A site's configuration and where its addresses come from.
- * - Accounts come from the environment. `readNetwork()` reads `NEAR_RPC_URL`
- *   and the deployment accounts. One build points at any network.
- * - A missing variable throws `MissingEnvError`. A typo in
- *   `NEAR_SITE_ACCOUNT` otherwise arrives as `AccountDoesNotExist` from a node.
- * - `SiteConfig` is client-side data, not functions. It crosses the
- *   server/client boundary in a Next app.
+ * Site config (`defineSite`, serializable `SiteConfig`) and `readNetwork()` (`NEAR_RPC_URL`, `NEAR_SITE_ACCOUNT`, throwing `MissingEnvError` before `AccountDoesNotExist`).
  */
 import { ContentKind } from './content';
 import { slotKeys } from './keys';
@@ -19,12 +13,7 @@ import {
 } from './near';
 import { parseUnits, toU128, type U128 } from './settlement';
 
-/**
- * Decimals a floor string is parsed against when the config does not say otherwise.
- * 24 is native NEAR's yocto count. A 6-decimal settlement token is the common demo case, and
- * parsing a floor for it against 24 would be off by 18 orders of magnitude — which is why
- * `parseFloor` takes the decimals explicitly and `defineSite` carries them through.
- */
+/** Default decimals when parsing floor strings (`24` for NEAR; pass explicit decimals to `parseFloor`/`defineSite` for 6-decimal tokens to avoid 18-order drift). */
 export const DEFAULT_SETTLEMENT_DECIMALS = 24;
 
 /** Parses a human decimal amount against a settlement asset's decimals. */
@@ -32,11 +21,7 @@ export function parseFloor(amount: string, decimals: number = DEFAULT_SETTLEMENT
   return parseUnits(amount, decimals);
 }
 
-/**
- * How `@stele/react` should render a slot. Purely a client-side convention — the chain stores an
- * opaque hash and knows nothing about kinds, and a site rendering its own payload structure through
- * `useSlot()` can ignore this entirely.
- */
+/** Client rendering hint for `@stele/react` via `useSlot()` (`text` | `link` | `image` | `video`). */
 export type SlotKindName = 'text' | 'link' | 'image' | 'video';
 
 export const CONTENT_KIND_BY_NAME: Record<SlotKindName, number> = {
@@ -46,12 +31,7 @@ export const CONTENT_KIND_BY_NAME: Record<SlotKindName, number> = {
   video: ContentKind.Video,
 };
 
-/**
- * Default gateway: a per-CID subdomain, so the CID is the whole address.
- * A template rather than a function because a site config crosses the server/client boundary in a
- * Next app, and functions do not. `{cid}` is replaced; a template without it is treated as a base
- * URL and joined.
- */
+/** Default IPFS gateway template (`{cid}` placeholder; serializable across server/client). */
 export const DEFAULT_CONTENT_GATEWAY = 'https://{cid}.ipfs.w3s.link/';
 
 /** Resolves a CID through a gateway template. */
@@ -115,11 +95,7 @@ export interface SiteConfig {
   keys: readonly string[];
 }
 
-/**
- * Validates a site config and normalizes it into the shape every consumer wants.
- * Every bad key is reported at once rather than on the first throw: a config with three typos
- * should cost one edit, not three build cycles.
- */
+/** Validates site config and reports all invalid keys together. */
 export function defineSite(input: DefineSiteInput): SiteConfig {
   const name = input.name.trim();
   const symbol = input.symbol.trim();
@@ -179,11 +155,7 @@ export interface SteleNetwork {
   settlementFt: AccountId | null;
 }
 
-/**
- * The deployment, from the environment.
- * `NEAR_FT_ACCOUNT` is optional and its absence means native settlement: a site with a token is a
- * different deployment plan, not a different build.
- */
+/** Reads `NEAR_*` deployment accounts; absent `NEAR_FT_ACCOUNT` selects native NEAR. */
 export function readNetwork(env: Record<string, string | undefined> = runtimeEnv()): SteleNetwork {
   const factory = requiredEnv(env, 'NEAR_FACTORY_ACCOUNT', 'the factory that deploys sites');
   const site = requiredEnv(env, 'NEAR_SITE_ACCOUNT', 'the site this app renders');

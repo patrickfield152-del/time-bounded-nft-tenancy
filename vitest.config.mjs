@@ -6,6 +6,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["tests/sandbox/flows.mjs", "packages/sdk/src/**/*.test.ts"],
+    pool: "threads",
     fileParallelism: false,
     testTimeout: 900_000,
     hookTimeout: 900_000,

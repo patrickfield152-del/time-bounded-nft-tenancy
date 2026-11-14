@@ -20,32 +20,14 @@ import { useSlot, type UseSlotResult } from './useSlot';
 
 const decoder = new TextDecoder();
 
-/**
- * The payload structures `<Slot>` understands. These are a CLIENT convention layered on top of the
- * opaque bytes, not part of the wire format — the chain stores a hash and knows nothing about them,
- * and a site with its own structure uses `useSlot()` and renders it directly.
- *   text   — UTF-8
- *   link   — JSON `{ "href": string, "label": string }`
- *   image  — the raw encoded image
- *   video  — JSON `{ "src": string }`
- */
+/** Client payload shapes (`text`, `link` `{ "href": string, "label": string }`, `image`, `video` `{ "src": string }`; custom sites use `useSlot()`). */
 export interface SlotProps {
-  /**
-   * The slot key from the site config, e.g. `hero.headline`.
-   * Named `id` because the origin's example does, and deliberately NOT forwarded to the DOM — this
-   * is an on-chain identity, not an HTML id, and spreading it would silently put `hero.headline` in
-   * the document's id namespace where it would collide with the page's own.
-   * It IS emitted as `data-slot`, which is a namespace nothing else owns — enough for a site to
-   * target slots in CSS, or to find which one an event came from, without that collision.
-   */
+  /** Slot key (`hero.headline`), emitted as `data-slot` (never DOM `id`). */
   id: string;
   /** The element to render. Defaults per kind: `span` for text, `a` for link, `img` for image. */
   as?: ElementType;
   className?: string;
-  /**
-   * What renders when there is no verified content. A ReactNode for text and link slots; for image
-   * and video slots, a string is used as the `src`.
-   */
+  /** Rendered when verified content is absent (`src` string for `image`/`video`). */
   fallback?: ReactNode;
   /** Escape hatch: render the slot yourself from the resolved state. */
   children?: (slot: UseSlotResult) => ReactNode;
@@ -62,7 +44,7 @@ export function Slot({ id, as, className, fallback, children }: SlotProps) {
   }
 
   if (slot.showFallback) {
-    return createElement(as ?? defaultElement(kind), { className, 'data-slot': id }, fallback);
+    return createElement(as ?? (kind === ContentKind.Link ? 'a' : 'span'), { className, 'data-slot': id }, fallback);
   }
 
   if (kind === ContentKind.Link) {
@@ -73,17 +55,10 @@ export function Slot({ id, as, className, fallback, children }: SlotProps) {
     return createElement(as ?? 'a', { className, href: link.href, 'data-slot': id }, link.label ?? link.href);
   }
 
-  return createElement(as ?? 'span', { className, 'data-slot': id }, decodePayload(slot));
+  return createElement(as ?? 'span', { className, 'data-slot': id }, slot.content.state === 'ready' ? decoder.decode(slot.content.payload) : '');
 }
 
-/**
- * Media renders from VERIFIED BYTES via an object URL, never from a gateway URL.
- * `<img src={gatewayUrl}>` would be simpler and is wrong: the browser fetches and paints those bytes
- * without anyone checking them against the on-chain hash, so a wrong or hostile gateway substitutes
- * content silently on a page whose entire premise is that content is verifiable.
- * The cost, stated plainly: no cross-page-load browser image cache and no progressive decode. That
- * is the price of "must never render unverified bytes", and the guarantee is the product.
- */
+/** Renders verified bytes via blob URL rather than `<img src={gatewayUrl}>` (8-byte check). */
 function MediaSlot({
   slot,
   id,
@@ -127,14 +102,6 @@ function MediaSlot({
 
   const element = as ?? (slot.definition.kind === 'video' ? 'video' : 'img');
   return createElement(element, { className, src, 'data-slot': id, alt: element === 'img' ? '' : undefined });
-}
-
-function defaultElement(kind: number): ElementType {
-  return kind === ContentKind.Link ? 'a' : 'span';
-}
-
-function decodePayload(slot: UseSlotResult): string {
-  return slot.content.state === 'ready' ? decoder.decode(slot.content.payload) : '';
 }
 
 function parseJson<T>(content: UseSlotResult['content']): T | null {

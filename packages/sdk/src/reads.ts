@@ -1,13 +1,5 @@
 /**
- * The read path: one `slot_bundle` view per slot. No indexer and no
- * `SlotReader`. One view returns slot, quote, owner, listing and rental.
- * - `encumbranceHash` hashes the returned records. The value passed to `buy`
- *   cannot describe a different read than the price the buyer saw.
- * - Tenancy liveness is computed here. `rental_of` carries the term; liveness
- *   is `now < expiry`, with `now` from the chain clock. `accruedOf` gives the
- *   unaccrued remainder without a second formula.
- * - `Slot` and `Rental` keep nanoseconds. Pure math in `./rentals` uses
- *   seconds; convert once here.
+ * Read path: one `slot_bundle` view per slot (replacing `SlotReader`) plus `encumbranceHash` (`encumbrance_preimage` in `contracts/site/src/views.rs`) and chain-clock tenancy checks (`rental_of`, `now` < `expiry`, `./rentals`).
  */
 import { sha256Hex } from './content';
 import { slotKey } from './keys';
@@ -156,15 +148,7 @@ export interface TermsView {
   royalty_bps: number;
 }
 
-/**
- * A site's terms: the constants it was cloned under, its economics, and its rental and floor
- * policy.
- * **Cacheable, but no longer immutable.** Before the first claim a publisher may change anything;
- * after it, take economics may only ratchet in the holder-safe direction, and rental terms stay
- * freely mutable both ways (a listing snapshots the fee, which is what makes that safe).
- * `termsLocked` tells you which regime a site is in. Cache for the lifetime of a page, not of a
- * session.
- */
+/** Site terms and policy; `termsLocked` enables ratchets after the first claim. */
 export interface SiteTerms {
   implementationVersion: number;
   takeBps: bigint;
@@ -200,40 +184,34 @@ export interface SiteTerms {
 
 const U128_MAX = (1n << 128n) - 1n;
 const U64_MAX = (1n << 64n) - 1n;
+const utf8 = new TextEncoder();
 
-function assertUnsigned(value: bigint, max: bigint, field: string): void {
+function chkU(value: bigint, max: bigint, field: string): void {
   if (value < 0n || value > max) {
     throw new RangeError(`stele/reads: ${field} ${value} does not fit in an unsigned wire integer`);
   }
 }
 
 function writeU64BE(view: DataView, offset: number, value: bigint): void {
-  assertUnsigned(value, U64_MAX, 'u64');
+  chkU(value, U64_MAX, 'u64');
   view.setBigUint64(offset, value, false);
 }
 
 function writeU128BE(view: DataView, offset: number, value: bigint): void {
-  assertUnsigned(value, U128_MAX, 'u128');
+  chkU(value, U128_MAX, 'u128');
   view.setBigUint64(offset, value >> 64n, false);
   view.setBigUint64(offset + 8, value & U64_MAX, false);
 }
 
 /**
- * The exact preimage `encumbrance_hash` hashes on chain, and the counterpart of
- * `encumbrance_preimage` in `contracts/site/src/views.rs`.
- * ```
- * [16B base_price u128][1B registered][4B len u32][lenB tenant UTF-8]
- * [8B expiry u64][16B prepaid u128][16B claimed u128]
- * ```
- * The length prefix makes the variable-width account id unambiguous. Computed
- * from the same `slot_bundle` records the buy used, so the guard cannot disagree
- * with the state it was read from.
+ * Binary preimage (2 lengths) matching `contracts/site/src/views.rs::encumbrance_preimage`:
+ * `[16B base_price][1B registered][4B len][tenant UTF-8][8B expiry][16B prepaid][16B claimed]`.
  */
 export function encumbrancePreimage(
   slot: Pick<SlotRecord, 'base_price' | 'registered'> | null,
   rental: Pick<RentalRecord, 'tenant' | 'expiry' | 'prepaid' | 'claimed'> | null,
 ): Uint8Array {
-  const tenant = new TextEncoder().encode(rental?.tenant ?? '');
+  const tenant = utf8.encode(rental?.tenant ?? '');
   if (tenant.length > 0xffff_ffff) {
     throw new RangeError(`stele/reads: tenant id is ${tenant.length} bytes, over the u32 prefix`);
   }
@@ -261,24 +239,20 @@ export function encumbranceHash(
   return sha256Hex(encumbrancePreimage(slot, rental));
 }
 
-/**
- * One slot, plus the encumbrance the buy guard needs, from a single
- * `slot_bundle` call. The bundle replaces five separate views; the hash is
- * computed here from the same records, so it cannot describe a different read.
- */
-interface SlotRead {
+/** Single `slot_bundle` result plus derived `expectedTerms`. */
+interface SlotRes {
   state: SlotState;
-  /** `null` for an unregistered key, which has no quote and cannot be bought. */
+  /** `null` for an unregistered key. */
   expectedTerms: string | null;
 }
 
-async function readSlotDataAt(
+async function slotData(
   reader: Reader,
   site: AccountId,
   key: string,
   nowNs: bigint,
   blockQuery?: QueryBlock,
-): Promise<SlotRead> {
+): Promise<SlotRes> {
   const tokenId = slotKey(key);
   const bundle = await readView<SlotBundleView>(reader, site, 'slot_bundle', { token_id: tokenId }, blockQuery);
   const record = bundle.slot;
@@ -368,23 +342,17 @@ async function readSlotDataAt(
   };
 }
 
-async function readSlotAt(
+async function slotAt(
   reader: Reader,
   site: AccountId,
   key: string,
   nowNs: bigint,
   blockQuery?: QueryBlock,
 ): Promise<SlotState> {
-  return (await readSlotDataAt(reader, site, key, nowNs, blockQuery)).state;
+  return (await slotData(reader, site, key, nowNs, blockQuery)).state;
 }
 
-/**
- * Reads every slot on a page, all keys in one wave.
- * Takes STRING keys and returns them on each row, because the alternative — hand back rows keyed by
- * token id and make the caller re-derive the mapping — is how a render loop ends up doing the same
- * lookup on every frame. Unregistered keys come back as rows with `registered: false` rather than
- * throwing: a page whose config has one key the owner has not registered yet is a normal state.
- */
+/** Reads every slot on a site in one parallel `slot_bundle` wave (`registered: false` rows instead of throwing). */
 export async function readSlots(
   reader: Reader,
   site: AccountId,
@@ -392,26 +360,29 @@ export async function readSlots(
 ): Promise<SlotState[]> {
   if (keys.length === 0) return [];
   const clock = await readClock(reader);
-  return Promise.all(keys.map((key) => readSlotAt(reader, site, key, clock.timestampNs)));
+  return Promise.all(keys.map((key) => slotAt(reader, site, key, clock.timestampNs)));
 }
 
-/** Single-slot convenience. Prefer `readSlots` for anything rendering more than one. */
+/** Single-slot read convenience. */
 export async function readSlot(reader: Reader, site: AccountId, key: string): Promise<SlotState> {
   const clock = await readClock(reader);
-  return readSlotAt(reader, site, key, clock.timestampNs);
+  return slotAt(reader, site, key, clock.timestampNs);
 }
 
-/**
- * The directory read: many sites, in parallel.
- * Results come back in the order the sites were given, each already zipped against its own key
- * list. There is no cross-site call to make — NEAR has no multicall — so this is `readSlots` per
- * board issued together, which is the same wall-clock cost as the slowest board.
- */
+/** Directory read across multiple sites sharing one `readClock` call. */
 export async function readSlotsMulti(
   reader: Reader,
   boards: ReadonlyArray<{ site: AccountId; keys: readonly string[] }>,
 ): Promise<SlotState[][]> {
-  return Promise.all(boards.map((board) => readSlots(reader, board.site, board.keys)));
+  if (boards.every((b) => b.keys.length === 0)) return boards.map(() => []);
+  const clock = await readClock(reader);
+  return Promise.all(
+    boards.map((board) =>
+      board.keys.length === 0
+        ? Promise.resolve([])
+        : Promise.all(board.keys.map((key) => slotAt(reader, board.site, key, clock.timestampNs))),
+    ),
+  );
 }
 
 /** A site's terms, from one `terms()` call. */
@@ -447,12 +418,7 @@ export async function readSiteTerms(
   };
 }
 
-/**
- * The subset of a site's terms the pricing twin needs, mapped without hand-copying five bps fields.
- * Worth a helper rather than a spread: the fields are all `bigint`s with similar names, so
- * transposing two of them type-checks, runs, and produces a quote that is merely *wrong* — which is
- * the failure mode the whole parity layer exists to prevent one level down.
- */
+/** Extracts `SiteEconomics` from `SiteTerms` without field transposition. */
 export function economicsFromTerms(terms: SiteTerms): SiteEconomics {
   return {
     takeBps: terms.takeBps,
@@ -468,14 +434,7 @@ export function isTokenSettled(terms: Pick<SiteTerms, 'settlementFt'>): boolean 
   return terms.settlementFt !== null;
 }
 
-/**
- * The `expected_terms` argument every buy needs.
- * Always read it in its own step, and pass it in. Do not compute it inline in an argument list. It
- * has to show the state the buyer saw. A fresh read at submit time would defeat the guard, because
- * it would pick up the change that the guard must reject.
- * It commits to the TENANCY as well as the floor and registration. The rental tuple is what a
- * buyer inherits, so a term opened between quote and submit invalidates the deal they saw.
- */
+/** Reads `expected_terms` (`encumbrance_hash`) directly from the site. */
 export async function readEncumbrance(
   reader: Reader,
   site: AccountId,
@@ -484,18 +443,7 @@ export async function readEncumbrance(
   return readView<string>(reader, site, 'encumbrance_hash', { token_id: slotKey(key) });
 }
 
-/**
- * Everything a buy needs, read against one block.
- * Three bugs that this exists to prevent all look like the chain misbehaving:
- * 1. A torn read. A quote from block N against terms from N+1 makes the buyer sign a state that
- *    never existed. Every view here is pinned to the clock's own block.
- * 2. Wall-clock deadlines. `buy` compares `deadline_ns` against `block_timestamp()`. A user whose
- *    clock is ten minutes slow gets a rejected purchase, and the UI cannot explain why. `nowNs` is
- *    the chain's clock, and `buildBuyFrom` uses it.
- * 3. An encumbered position that reads as unbuyable. `unaccruedRent` and `netCost` come back on the
- *    same read, so the confirm dialog can say "you pay X, you inherit Y, net Z" from numbers that
- *    all describe one block.
- */
+/** Pinned-block slot state, `expectedTerms`, `netCost`, and `block_timestamp` chain clock (`bigint` `deadline_ns` for `buildBuyFrom`). */
 export interface BuyContext {
   slot: SlotState;
   expectedTerms: string;
@@ -516,7 +464,7 @@ export async function readBuyContext(
   // derived from those same records rather than fetched in a second round trip, so the guard and
   // the displayed state cannot disagree. An unregistered key has no quote and no hash: refuse with
   // the actionable sentence instead of building a free buy.
-  const { state: slot, expectedTerms } = await readSlotDataAt(reader, site, key, clock.timestampNs, pinned);
+  const { state: slot, expectedTerms } = await slotData(reader, site, key, clock.timestampNs, pinned);
 
   if (!slot.registered || expectedTerms === null) {
     throw new Error(
@@ -552,11 +500,7 @@ export interface Rental {
   isLapsed: boolean;
 }
 
-/**
- * @param nowNs The chain time to judge liveness against. Omit and it is READ FROM THE CHAIN, at the
- *   cost of one extra round trip. It is deliberately not `Date.now()`: liveness is decided by
- *   `block_timestamp()`, and the two clocks are close and never equal.
- */
+/** Reads rental state using `nowNs` or a fresh chain clock read. */
 export async function readRental(
   reader: Reader,
   site: AccountId,
@@ -638,13 +582,7 @@ export async function readListing(
   };
 }
 
-/**
- * Whether an account may write this slot's content.
- * Read rather than reconstructed from ownership, so the client cannot offer an edit button for a
- * transaction that will revert — and during a live tenancy the TENANT holds the content gate while
- * the owner is locked out entirely. There is one definition of who may write, and it is in the
- * contract.
- */
+/** Checks `can_edit` on-chain (covers owners, active tenants, and editor grants). */
 export async function readCanEdit(
   reader: Reader,
   site: AccountId,

@@ -1,20 +1,14 @@
-//! Read-only surface: the market views, the tenancy tuple, the SDK's one-call
-//! `terms`, and the `encumbrance_hash` whose preimage the SDK must reproduce
-//! byte for byte. State changes live in `lib.rs`, the FT entry point in
-//! `ft_receiver.rs`.
-//!
-//! `quote` and `encumbrance_hash` are the two reads a buyer needs pinned to
-//! the same block as the purchase: `quote` is the price both the SDK and
-//! `buy` see, and `encumbrance_hash` is the `expected_terms` value that makes
-//! a stale buy revert instead of inheriting tenancy state the buyer never saw.
+//! Read-only views: market state, tenancy tuple, `terms`, and `encumbrance_hash` (SDK parity preimage).
+//! State mutations live in `lib.rs`; FT entry point lives in `ft.rs` (`ft_receiver.rs`).
+//! Buyers pin `quote` and `encumbrance_hash` (`expected_terms`) for `buy` (`slot` state).
 
 use near_sdk::json_types::U128;
-use near_sdk::{env, near, AccountId};
+use near_sdk::{AccountId, env, near};
 use near_sdk_contract_tools::nft::Nep171Controller;
 use primitive_types::U256;
 
 use crate::rentals;
-use crate::{pricing, Contract, ContractExt, Listing, Quote, Rental, Slot, TokenId, NS_PER_SEC};
+use crate::{Contract, ContractExt, Listing, NS_PER_SEC, Quote, Rental, Slot, TokenId, pricing};
 
 /// The site terms the SDK reads in one call (one RPC instead of a dozen).
 #[near(serializers = [json])]
@@ -49,14 +43,8 @@ pub struct TermsView {
     pub royalty_bps: u16,
 }
 
-/// One-shot read for a slot and everything the SDK composes around it.
-///
-/// Additive by construction: every field is the exact wire shape of its
-/// standalone view (`slot_of`, `quote`, `owner_of_or_zero`, `listing_of`,
-/// `rental_of`), so existing clients keep working and the bundle can be
-/// compared field-for-field in tests. Registration is not an error here:
-/// `slot` is `None` and `quote` is the same zero quote the standalone view
-/// returns, which lets the SDK keep the actionable "not registered" sentence.
+/// Single-call slot bundle matching standalone views (`slot_of`, `quote`, `owner_of_or_zero`, `listing_of`, `rental_of`).
+/// Unregistered slots return `slot: None` and a zero quote.
 #[near(serializers = [json])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlotBundle {
@@ -69,9 +57,7 @@ pub struct SlotBundle {
 
 #[near]
 impl Contract {
-    /// Origin `quote`: `(effective floor, take price)` for one slot. An
-    /// unregistered key quotes zeros, exactly as the origin view read its
-    /// zeroed mapping entry.
+    /// Origin `quote`: `(effective floor, take price)` for one slot; zeros if unregistered.
     pub fn quote(&self, token_id: TokenId) -> Quote {
         let Some(slot) = self.slots.get(&token_id) else {
             return Quote {
@@ -135,9 +121,7 @@ impl Contract {
         self.rentals.get(&token_id).cloned()
     }
 
-    /// Origin `userOf`: the live tenant, absent once the term has lapsed. An
-    /// expired-but-uncleared record reads as no tenancy, because the content
-    /// gate has already returned to the owner.
+    /// Origin `userOf`: active tenant (`None` when expired).
     pub fn tenant_of(&self, token_id: TokenId) -> Option<AccountId> {
         self.rentals
             .get(&token_id)
@@ -145,8 +129,7 @@ impl Contract {
             .map(|rental| rental.tenant.clone())
     }
 
-    /// Origin `userExpires`: the term's expiry in nanoseconds, `0` when there is
-    /// none. Raw, so a lapsed record still reports the timestamp it ended at.
+    /// Origin `userExpires`: term expiry in nanoseconds (`0` when none).
     pub fn tenant_expires(&self, token_id: TokenId) -> u64 {
         self.rentals
             .get(&token_id)
@@ -167,7 +150,6 @@ impl Contract {
         );
         U128(pricing::to_u128(accrued, "accrued rent"))
     }
-
 
     pub fn pending_withdrawals(&self, account: AccountId) -> U128 {
         self.pending_withdrawals
@@ -257,8 +239,7 @@ impl Contract {
     /// 32 bytes. The digest is hex-encoded lowercase (64 characters). The SDK
     /// must build the same preimage: no field reordering, no intermediate JSON.
     pub fn encumbrance_hash(&self, token_id: TokenId) -> String {
-        let preimage =
-            encumbrance_preimage(self.slots.get(&token_id), self.rentals.get(&token_id));
+        let preimage = encumbrance_preimage(self.slots.get(&token_id), self.rentals.get(&token_id));
         to_hex(&env::sha256(&preimage))
     }
 }
@@ -280,8 +261,8 @@ pub fn encumbrance_preimage(slot: Option<&Slot>, rental: Option<&Rental>) -> Vec
     };
 
     let tenant_bytes = tenant.as_bytes();
-    let tenant_length = u32::try_from(tenant_bytes.len())
-        .unwrap_or_else(|_| env::panic_str("AccountIdTooLong"));
+    let tenant_length =
+        u32::try_from(tenant_bytes.len()).unwrap_or_else(|_| env::panic_str("AccountIdTooLong"));
     let mut preimage = Vec::with_capacity(16 + 1 + 4 + tenant_bytes.len() + 8 + 16 + 16);
     preimage.extend_from_slice(&base_price.to_be_bytes());
     preimage.push(registered);

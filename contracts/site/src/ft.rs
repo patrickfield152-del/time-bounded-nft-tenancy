@@ -1,31 +1,15 @@
-//! NEP-141 entry point: the settlement FT calls `ft_on_transfer`, this
-//! contract parses the JSON message and dispatches.
+//! NEP-141 entry point: `ft_on_transfer` parses JSON `msg` and dispatches `buy`, `rent`, or `extend`.
+//! Returns `Value(0)` to keep all, or `Value(n)` to refund; malformed JSON, foreign caller, or unsupported action refunds in full.
+//! Market/storage preconditions panic so `ft_resolve_transfer` refunds.
+//! Messages (unknown fields ignored):
+//! - `{"action":"buy","token_id":String,"max_price":U128,"expected_terms":String,"deadline_ns":u64}`
+//! - `{"action":"rent","token_id":String,"duration_secs":u64,"expected_rate_per_day":U128}`
+//! - `{"action":"extend","token_id":String,"duration_secs":u64,"expected_rate_per_day":U128}`
 //!
-//! The return value is the NEP-141 refund amount: `Value(0)` means "keep the
-//! whole transfer", `Value(n)` means "return n to the sender". A malformed
-//! message, a foreign caller or an unsupported action refunds in full. Market
-//! guards on a well-formed request (paused, tenancy state, rate, duration,
-//! deadline, terms, registration, availability, cooldown, slippage) panic with
-//! their specific message, and the FT's `ft_resolve_transfer` then refunds the
-//! sender; the storage precondition is a hard panic because a NEP-141 transfer
-//! cannot pay NEAR storage.
-//!
-//! Supported messages (unknown fields are ignored so a later action can add
-//! arguments without breaking older senders):
-//!
-//! - `{"action":"buy","token_id":String,"max_price":U128,
-//!    "expected_terms":String,"deadline_ns":u64}`
-//! - `{"action":"rent","token_id":String,"duration_secs":u64,
-//!    "expected_rate_per_day":U128}`
-//! - `{"action":"extend","token_id":String,"duration_secs":u64,
-//!    "expected_rate_per_day":U128}`
-//!
-//! The tenancy actions run the same guards and bookings as the native
-//! `rent`/`extend_rental` through `rent_inner`/`extend_inner`; only the funding
-//! source differs, and an overpayment is returned as the `Value` refund.
+//! Tenancy paths (`extend_rental`) call `rent_inner`/`extend_inner` and refund overpayment via `Value`.
 
 use near_sdk::json_types::U128;
-use near_sdk::{env, near, AccountId, PromiseOrValue};
+use near_sdk::{AccountId, PromiseOrValue, env, near};
 use serde::Deserialize;
 
 use crate::{Contract, ContractExt};
@@ -76,25 +60,22 @@ impl Contract {
 
         match action.as_str() {
             "buy" => {
-                let (Some(token_id), Some(max_price), Some(expected_terms), Some(deadline_ns)) = (
-                    token_id,
-                    max_price,
-                    expected_terms,
-                    deadline_ns,
-                ) else {
+                let (Some(token_id), Some(max_price), Some(expected_terms), Some(deadline_ns)) =
+                    (token_id, max_price, expected_terms, deadline_ns)
+                else {
                     return PromiseOrValue::Value(amount);
                 };
                 // The FT amount is the budget; a buy never defers on this path
                 // because the recipient must already cover its own storage.
-                match self.settle_buy(
-                    sender_id,
+                match self.settle_buy(crate::BuyOrder {
+                    recipient: sender_id,
                     token_id,
                     max_price,
                     expected_terms,
                     deadline_ns,
-                    amount,
-                    true,
-                ) {
+                    charged: amount,
+                    is_ft: true,
+                }) {
                     PromiseOrValue::Value(refund) => PromiseOrValue::Value(refund),
                     PromiseOrValue::Promise(_) => env::panic_str("FtSettlementCannotDefer"),
                 }

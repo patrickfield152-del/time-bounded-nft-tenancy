@@ -13,22 +13,12 @@ export interface UseSlotResult {
   state: SlotState | undefined;
   /** Verified content, or why there is none. */
   content: ContentStatus;
-  /**
-   * Whether `fallback` should render. True whenever there is no verified content to show, for ANY
-   * reason — unclaimed, never edited, gateway down, hash mismatch, or written under a scheme this
-   * version cannot read. A renderer that branched on each of those separately would eventually miss
-   * one and paint a blank box.
-   */
+  /** True whenever no verified content is ready (renders `fallback`). */
   showFallback: boolean;
   isLoading: boolean;
 }
 
-/**
- * Everything one slot needs to render itself.
- *
- * Reads from the provider's single page-wide fetch rather than doing its own — see `<SlotProvider>`
- * for why that is load-bearing rather than an optimization.
- */
+/** Returns slot state and verified content from `<SlotProvider>`. */
 export function useSlot(key: string): UseSlotResult {
   const { config, slots, contentStore, isLoading } = useStele();
 

@@ -7,7 +7,7 @@
 
 use near_sdk::json_types::U128;
 use near_sdk::test_utils::VMContextBuilder;
-use near_sdk::{testing_env, AccountId};
+use near_sdk::{AccountId, testing_env};
 use serde::Deserialize;
 use stele_site::views::encumbrance_preimage;
 use stele_site::{Contract, Listing, Quote, Rental, SiteConfig, Slot};
@@ -103,7 +103,13 @@ fn slot_bundle_matches_standalone_views() {
 
     let empty = c.slot_bundle("never.registered".to_owned());
     assert_eq!(empty.slot, None);
-    assert_eq!(empty.quote, Quote { effective_floor: U128(0), price: U128(0) });
+    assert_eq!(
+        empty.quote,
+        Quote {
+            effective_floor: U128(0),
+            price: U128(0)
+        }
+    );
     assert_eq!(empty.owner, None);
     assert_eq!(empty.listing, None);
     assert_eq!(empty.rental, None);
@@ -152,7 +158,10 @@ fn encumbrance_matches_cross_language_vectors() {
         if let Some(fixture) = &row.slot {
             c.slots.insert(
                 id.clone(),
-                slot(fixture.base_price.parse().expect("u128 base price"), fixture.registered),
+                slot(
+                    fixture.base_price.parse().expect("u128 base price"),
+                    fixture.registered,
+                ),
             );
         }
         if let Some(fixture) = &row.rental {
@@ -168,7 +177,17 @@ fn encumbrance_matches_cross_language_vectors() {
         }
 
         let preimage = encumbrance_preimage(c.slots.get(&id), c.rentals.get(&id));
-        assert_eq!(hex(&preimage), row.preimage_hex, "preimage drift for {}", row.name);
-        assert_eq!(c.encumbrance_hash(id), row.hash, "hash drift for {}", row.name);
+        assert_eq!(
+            hex(&preimage),
+            row.preimage_hex,
+            "preimage drift for {}",
+            row.name
+        );
+        assert_eq!(
+            c.encumbrance_hash(id),
+            row.hash,
+            "hash drift for {}",
+            row.name
+        );
     }
 }
