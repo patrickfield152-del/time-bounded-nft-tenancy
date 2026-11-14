@@ -142,4 +142,4 @@ near-stele/
 ## Origin, license, hackathon
 Port of an MIT-licensed EVM product. Provenance, baseline commit, and archive hash are in `ORIGIN.md`. `ATTRIBUTION.md` reproduces the upstream notice. The MIT license is kept. There is no git remote, and publishing is a human action.
 
-Track: `nfts`. Development ends 2026-11-14T23:59:00Z (UTC).
+Tracks: `realworld`, `business`. Development ends 2026-11-14T23:59:00Z (UTC).
